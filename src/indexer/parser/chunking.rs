@@ -312,7 +312,7 @@ fn chunk_oversized_node(
                 line_start: chunk_line_start,
                 line_end,
                 symbol_name: name.clone(),
-                symbol_kind: sym_kind.clone(),
+                symbol_kind: sym_kind,
                 symbol_path: None,
                 scopes: scopes.clone(),
             });

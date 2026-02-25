@@ -82,8 +82,8 @@ impl ScoringIndex {
         }
 
         // Serialize with rkyv
-        let bytes = rkyv::to_bytes::<_, 256>(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        let bytes =
+            rkyv::to_bytes::<_, 256>(self).map_err(|e| std::io::Error::other(e.to_string()))?;
 
         // Write to file
         std::fs::write(path, bytes)?;

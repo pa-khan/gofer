@@ -165,7 +165,7 @@ pub async fn tool_search(args: Value, ctx: &ToolContext) -> Result<Value> {
                 h.rrf_score += rrf;
                 if h.matched_symbol.is_none() {
                     h.matched_symbol = Some(sym.name.clone());
-                    h.symbol_kind = Some(sym.kind.clone());
+                    h.symbol_kind = Some(sym.kind);
                 }
             })
             .or_insert(FusedHit {
@@ -175,7 +175,7 @@ pub async fn tool_search(args: Value, ctx: &ToolContext) -> Result<Value> {
                 rrf_score: rrf,
                 vector_score: None,
                 matched_symbol: Some(sym.name.clone()),
-                symbol_kind: Some(sym.kind.clone()),
+                symbol_kind: Some(sym.kind),
             });
     }
 
@@ -202,7 +202,7 @@ pub async fn tool_search(args: Value, ctx: &ToolContext) -> Result<Value> {
                         rrf_score: h.rrf_score,
                         vector_score: h.vector_score,
                         matched_symbol: h.matched_symbol.clone(),
-                        symbol_kind: h.symbol_kind.clone(),
+                        symbol_kind: h.symbol_kind,
                     }
                 })
                 .collect(),
@@ -575,16 +575,18 @@ pub async fn tool_smart_file_selection(args: Value, ctx: &ToolContext) -> Result
 
     for (file_path, vector_score) in file_scores {
         // Get symbols in this file
-        let symbols = match ctx.sqlite.get_symbols(Some(&file_path), None, 0, 500).await {
-            Ok(syms) => syms,
-            Err(_) => Vec::new(),
-        };
+        let symbols: Vec<crate::models::chunk::SymbolWithPath> = ctx
+            .sqlite
+            .get_symbols(Some(&file_path), None, 0, 500)
+            .await
+            .unwrap_or_default();
 
         // Get file summary if available
-        let summary = match ctx.sqlite.get_summary_by_path(&file_path).await {
-            Ok(s) => s,
-            Err(_) => None,
-        };
+        let summary: Option<crate::models::chunk::FileSummaryWithPath> = ctx
+            .sqlite
+            .get_summary_by_path(&file_path)
+            .await
+            .unwrap_or_default();
 
         // Get file metadata for scoring
         let file_metadata = get_file_metadata(&file_path).await;
@@ -620,11 +622,11 @@ pub async fn tool_smart_file_selection(args: Value, ctx: &ToolContext) -> Result
                 "path": make_relative(&ctx.root_path, &file_path),
                 "score": format!("{:.3}", final_score),
                 "reason": reason,
-                "summary": summary.and_then(|s| {
+                "summary": summary.map(|s| {
                     if s.summary.len() > 150 {
-                        Some(format!("{}...", &s.summary[..147]))
+                        format!("{}...", &s.summary[..147])
                     } else {
-                        Some(s.summary)
+                        s.summary
                     }
                 }),
                 "key_symbols": key_symbols
@@ -765,9 +767,7 @@ fn extract_context_from_content(content: &str) -> Option<String> {
             if let Some(name_start) =
                 trimmed[pos + 4..].find(|c: char| c.is_alphanumeric() || c == '_')
             {
-                if let Some(name_end) =
-                    trimmed[pos + 4 + name_start..].find(|c: char| c == '(' || c == '<')
-                {
+                if let Some(name_end) = trimmed[pos + 4 + name_start..].find(['(', '<']) {
                     return Some(
                         trimmed[pos + 4 + name_start..pos + 4 + name_start + name_end].to_string(),
                     );
@@ -802,9 +802,7 @@ fn extract_context_from_content(content: &str) -> Option<String> {
         if trimmed.contains("class ") {
             if let Some(start) = trimmed.find("class ") {
                 let after_class = &trimmed[start + 6..];
-                if let Some(name_end) =
-                    after_class.find(|c: char| c == ' ' || c == '{' || c == '(' || c == '<')
-                {
+                if let Some(name_end) = after_class.find([' ', '{', '(', '<']) {
                     return Some(after_class[..name_end].trim().to_string());
                 }
             }
@@ -819,9 +817,7 @@ fn extract_context_from_content(content: &str) -> Option<String> {
             };
             if let Some(start) = trimmed.find(keyword) {
                 let after_keyword = &trimmed[start + keyword.len()..];
-                if let Some(name_end) =
-                    after_keyword.find(|c: char| c == ' ' || c == '{' || c == '<')
-                {
+                if let Some(name_end) = after_keyword.find([' ', '{', '<']) {
                     return Some(after_keyword[..name_end].trim().to_string());
                 }
             }

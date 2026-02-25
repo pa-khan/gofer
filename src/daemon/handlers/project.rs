@@ -27,36 +27,37 @@ pub async fn tool_project_tree(args: Value, ctx: &ToolContext) -> Result<Value> 
         .into_iter();
 
     // Optional glob filter
-    let glob_pat = pattern.map(|p| glob::Pattern::new(p).ok()).flatten();
+    let glob_pat = pattern.and_then(|p| glob::Pattern::new(p).ok());
 
     // We filter entries but need to iterate to get them
-    for entry in walker.filter_entry(|e: &DirEntry| {
-        let name = e.file_name().to_string_lossy();
-        // Skip hidden and common ignored dirs
-        !name.starts_with('.')
-            && name != "node_modules"
-            && name != "target"
-            && name != "dist"
-            && name != "build"
-    }) {
-        if let Ok(e) = entry {
-            let relative = make_relative(&ctx.root_path, e.path().to_str().unwrap_or(""));
-            if relative.is_empty() {
+    for e in walker
+        .filter_entry(|e: &DirEntry| {
+            let name = e.file_name().to_string_lossy();
+            // Skip hidden and common ignored dirs
+            !name.starts_with('.')
+                && name != "node_modules"
+                && name != "target"
+                && name != "dist"
+                && name != "build"
+        })
+        .flatten()
+    {
+        let relative = make_relative(&ctx.root_path, e.path().to_str().unwrap_or(""));
+        if relative.is_empty() {
+            continue;
+        } // skip root itself if empty
+
+        // Apply pattern filter only to files, or inclusion logic
+        if let Some(ref gp) = glob_pat {
+            if e.file_type().is_file() && !gp.matches_path(e.path()) {
                 continue;
-            } // skip root itself if empty
-
-            // Apply pattern filter only to files, or inclusion logic
-            if let Some(ref gp) = glob_pat {
-                if e.file_type().is_file() && !gp.matches_path(e.path()) {
-                    continue;
-                }
             }
-
-            tree.push(json!({
-                "path": relative,
-                "type": if e.file_type().is_dir() { "directory" } else { "file" }
-            }));
         }
+
+        tree.push(json!({
+            "path": relative,
+            "type": if e.file_type().is_dir() { "directory" } else { "file" }
+        }));
     }
 
     Ok(json!({

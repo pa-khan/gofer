@@ -463,11 +463,9 @@ pub async fn tool_find_files(args: Value, ctx: &ToolContext) -> Result<Value> {
     let walker = glob::glob(&search_root.join(pat).to_string_lossy());
 
     if let Ok(paths) = walker {
-        for entry in paths {
-            if let Ok(path) = entry {
-                if path.is_file() {
-                    files.push(make_relative(&ctx.root_path, path.to_str().unwrap_or("")));
-                }
+        for path in paths.flatten() {
+            if path.is_file() {
+                files.push(make_relative(&ctx.root_path, path.to_str().unwrap_or("")));
             }
         }
     }
@@ -514,7 +512,7 @@ pub async fn tool_grep(args: Value, ctx: &ToolContext) -> Result<Value> {
 
     let walker = WalkDir::new(&search_root).into_iter();
 
-    let glob_pat = glob_filter.map(|g| glob::Pattern::new(g).ok()).flatten();
+    let glob_pat = glob_filter.and_then(|g| glob::Pattern::new(g).ok());
 
     for entry in walker.filter_map(|e| e.ok()) {
         if !entry.file_type().is_file() {
@@ -633,30 +631,29 @@ async fn resolve_types(
         let symbols = sqlite.get_symbol_by_name(&type_name).await?;
         for symbol in symbols {
             if let Ok(Some(file_info)) = sqlite.get_file_by_id(symbol.file_id).await {
-                if file_info.path == file_path {
-                    if symbol.kind == crate::models::chunk::SymbolKind::Struct
+                if file_info.path == file_path
+                    && (symbol.kind == crate::models::chunk::SymbolKind::Struct
                         || symbol.kind == crate::models::chunk::SymbolKind::Enum
                         || symbol.kind == crate::models::chunk::SymbolKind::Interface
-                        || symbol.kind == crate::models::chunk::SymbolKind::TypeAlias
-                    {
-                        let type_file_path = std::path::PathBuf::from(&file_info.path);
-                        if let Ok(file_content) = tokio::fs::read_to_string(&type_file_path).await {
-                            let lines: Vec<&str> = file_content.lines().collect();
-                            if symbol.line_start > 0 && symbol.line_end as usize <= lines.len() {
-                                let start_idx = (symbol.line_start - 1) as usize;
-                                let end_idx = symbol.line_end as usize;
-                                let type_code = lines[start_idx..end_idx].join("\n");
-                                let line_count = end_idx - start_idx;
+                        || symbol.kind == crate::models::chunk::SymbolKind::TypeAlias)
+                {
+                    let type_file_path = std::path::PathBuf::from(&file_info.path);
+                    if let Ok(file_content) = tokio::fs::read_to_string(&type_file_path).await {
+                        let lines: Vec<&str> = file_content.lines().collect();
+                        if symbol.line_start > 0 && symbol.line_end as usize <= lines.len() {
+                            let start_idx = (symbol.line_start - 1) as usize;
+                            let end_idx = symbol.line_end as usize;
+                            let type_code = lines[start_idx..end_idx].join("\n");
+                            let line_count = end_idx - start_idx;
 
-                                type_defs.push(json!({
-                                    "section": "type",
-                                    "name": type_name,
-                                    "kind": symbol.kind,
-                                    "code": type_code,
-                                    "file": file_info.path,
-                                    "lines": line_count
-                                }));
-                            }
+                            type_defs.push(json!({
+                                "section": "type",
+                                "name": type_name,
+                                "kind": symbol.kind,
+                                "code": type_code,
+                                "file": file_info.path,
+                                "lines": line_count
+                            }));
                         }
                     }
                 }

@@ -665,7 +665,7 @@ mod tests {
         let chunk = make_chunk("test_id", "/path/to/file.rs", "fn main() {}", 10, 20);
         let embedding = random_vector(TEST_VECTOR_DIM);
         storage
-            .upsert_chunks(&[chunk], &[embedding.clone()])
+            .upsert_chunks(&[chunk], std::slice::from_ref(&embedding))
             .await
             .unwrap();
 
@@ -745,7 +745,7 @@ mod tests {
         let embedding = random_vector(TEST_VECTOR_DIM);
 
         storage
-            .upsert_chunks(&[chunk], &[embedding.clone()])
+            .upsert_chunks(&[chunk], std::slice::from_ref(&embedding))
             .await
             .unwrap();
 

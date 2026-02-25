@@ -127,6 +127,7 @@ pub async fn tool_execute_function(args: Value, ctx: &ToolContext) -> Result<Val
 }
 
 /// Run specific test
+#[allow(dead_code)]
 pub async fn tool_run_test(args: Value, ctx: &ToolContext) -> Result<Value> {
     let path = args
         .get("path")
@@ -164,6 +165,7 @@ pub async fn tool_run_test(args: Value, ctx: &ToolContext) -> Result<Value> {
 }
 
 /// Run all tests in project
+#[allow(dead_code)]
 pub async fn tool_run_all_tests(args: Value, ctx: &ToolContext) -> Result<Value> {
     let filter = args.get("filter").and_then(|v| v.as_str());
 
@@ -513,6 +515,7 @@ console.log(JSON.stringify(result));
 
 // Test runner implementations
 
+#[allow(dead_code)]
 async fn run_rust_test(
     project_root: &Path,
     test_name: Option<&str>,
@@ -569,6 +572,7 @@ async fn run_rust_test(
     }))
 }
 
+#[allow(dead_code)]
 async fn run_python_test(path: &Path, test_name: Option<&str>, timeout_secs: u64) -> Result<Value> {
     let start = std::time::Instant::now();
 
@@ -615,6 +619,7 @@ async fn run_python_test(path: &Path, test_name: Option<&str>, timeout_secs: u64
     }))
 }
 
+#[allow(dead_code)]
 async fn run_javascript_test(
     path: &Path,
     test_name: Option<&str>,
@@ -666,6 +671,7 @@ async fn run_javascript_test(
     }))
 }
 
+#[allow(dead_code)]
 async fn run_cargo_tests(
     project_root: &Path,
     filter: Option<&str>,
@@ -708,6 +714,7 @@ async fn run_cargo_tests(
     }))
 }
 
+#[allow(dead_code)]
 async fn run_npm_tests(
     project_root: &Path,
     filter: Option<&str>,
@@ -750,6 +757,7 @@ async fn run_npm_tests(
     }))
 }
 
+#[allow(dead_code)]
 async fn run_pytest_tests(
     project_root: &Path,
     filter: Option<&str>,

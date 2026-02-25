@@ -96,7 +96,7 @@ pub async fn tool_get_index_status(ctx: &ToolContext) -> Result<Value> {
     };
 
     // Determine IndexHealth based on spec criteria
-    let health = if completeness > 95.0 && pending == 0 && age_minutes >= 0 && age_minutes < 60 {
+    let health = if completeness > 95.0 && pending == 0 && (0..60).contains(&age_minutes) {
         "Healthy"
     } else if completeness > 80.0 && pending < 10 && age_minutes < 1440 {
         "Degraded"

@@ -103,7 +103,7 @@ pub async fn run_pipeline(
     progress: Option<Arc<SyncProgress>>,
 ) -> Result<Vec<ParsedFileMetadata>> {
     let num_workers = std::thread::available_parallelism()
-        .map(|n| ((n.get() / 2).max(4)).min(8))
+        .map(|n| (n.get() / 2).clamp(4, 8))
         .unwrap_or(4);
 
     tracing::info!(
@@ -970,7 +970,7 @@ async fn flush_sqlite_batch(
             builder.push_values(chunk, |mut b, s| {
                 b.push_bind(file_id)
                     .push_bind(&s.name)
-                    .push_bind(&s.kind)
+                    .push_bind(s.kind)
                     .push_bind(s.line_start)
                     .push_bind(s.line_end)
                     .push_bind(&s.signature);

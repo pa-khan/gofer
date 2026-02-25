@@ -192,9 +192,9 @@ impl Reranker {
             padded_token_type_ids.extend_from_slice(&all_token_type_ids[i]);
 
             // Add padding (0s)
-            padded_input_ids.extend(std::iter::repeat(0i64).take(padding_len));
-            padded_attention_masks.extend(std::iter::repeat(0i64).take(padding_len));
-            padded_token_type_ids.extend(std::iter::repeat(0i64).take(padding_len));
+            padded_input_ids.extend(std::iter::repeat_n(0i64, padding_len));
+            padded_attention_masks.extend(std::iter::repeat_n(0i64, padding_len));
+            padded_token_type_ids.extend(std::iter::repeat_n(0i64, padding_len));
         }
 
         // Create batch tensors

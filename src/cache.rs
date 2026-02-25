@@ -421,7 +421,7 @@ impl CacheManager {
         // Note: LruCache iteration would need to be implemented
 
         let snapshot_bytes = rkyv::to_bytes::<_, 256>(&cache_entries)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
 
         snapshot_data.extend_from_slice(&snapshot_bytes);
 

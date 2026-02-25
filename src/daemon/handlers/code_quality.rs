@@ -42,7 +42,7 @@ pub async fn tool_format_file(args: Value, ctx: &ToolContext) -> Result<Value> {
     let ext = abs_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     // Detect formatter based on extension
-    let formatter_name = formatter.unwrap_or_else(|| match ext {
+    let formatter_name = formatter.unwrap_or(match ext {
         "rs" => "rustfmt",
         "ts" | "tsx" | "js" | "jsx" | "json" => "prettier",
         "py" => "black",
@@ -80,7 +80,7 @@ pub async fn tool_format_file(args: Value, ctx: &ToolContext) -> Result<Value> {
     let formatted_lines = formatted_content.lines().count();
 
     let changes_made = original_content != formatted_content;
-    let diff_lines = (original_lines as i32 - formatted_lines as i32).abs() as u32;
+    let diff_lines = (original_lines as i32 - formatted_lines as i32).unsigned_abs();
 
     // Invalidate cache
     if changes_made {
