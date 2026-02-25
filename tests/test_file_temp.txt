@@ -1,0 +1,9 @@
+// Test file for patch_file comparison
+fn new_function() {
+    println!("This is new code");
+}
+
+fn another_function() {
+    let x = 42;
+    return x;
+}

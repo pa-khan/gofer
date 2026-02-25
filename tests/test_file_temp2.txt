@@ -1,0 +1,9 @@
+// Test file for Edit tool comparison
+fn new_function() {
+    println!("This is new code");
+}
+
+fn another_function() {
+    let x = 42;
+    return x;
+}

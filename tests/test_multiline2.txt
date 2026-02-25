@@ -1,0 +1,11 @@
+struct User {
+    name: String,
+    age: u32,
+    email: String,
+}
+
+impl User {
+    fn new(name: String) -> Self {
+        Self { name, age: 0 }
+    }
+}

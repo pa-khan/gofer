@@ -1,0 +1,120 @@
+[package]
+name = "gofer"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+gpu = ["ort/cuda"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Storage
+lancedb = "0.23"
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
+arrow-array = "56"
+arrow-schema = "56"
+
+# Parsing
+tree-sitter = "0.24"
+tree-sitter-rust = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-go = "0.23"
+tree-sitter-html = "0.23"
+streaming-iterator = "0.1"
+regex = "1"
+toml = "0.8"
+pulldown-cmark = "0.12"
+
+# Embeddings
+fastembed = "5"
+
+# Re-ranking
+ort = { version = "2.0.0-rc.11", features = ["download-binaries"] }
+tokenizers = "0.21"
+ndarray = "0.16"
+ureq = "3"
+
+# LLM Summarization (candle)
+candle-core = "0.8"
+candle-nn = "0.8"
+candle-transformers = "0.8"
+hf-hub = "0.3"
+
+# File Watcher
+notify = "7"
+notify-debouncer-mini = "0.5"
+ignore = "0.4"
+
+# Git
+git2 = "0.20"
+
+# Async trait
+async-trait = "0.1"
+
+# Allocator
+tikv-jemallocator = "0.6"
+
+# String interning
+smol_str = { version = "0.3", features = ["serde"] }
+
+# Lazy static for global state
+lazy_static = "1.4"
+
+# Zero-copy serialization for cache
+rkyv = { version = "0.7", features = ["validation"] }
+
+# Utils
+anyhow = "1"
+blake3 = "1"
+chrono = "0.4"
+clap = { version = "4", features = ["derive"] }
+daemonize = "0.5"
+dirs = "5"
+futures = "0.3"
+rayon = "1.10"
+num_cpus = "1"
+once_cell = "1"
+reqwest = { version = "0.12", features = ["json"] }
+thiserror = "2"
+tracing = "0.1"
+tokio-util = "0.7"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tempfile = "3"
+urlencoding = "2"
+uuid = { version = "1", features = ["v4"] }
+glob = "0.3.3"
+walkdir = "2.5.0"
+
+# LSP client для rust-analyzer
+lsp-types = "0.97"
+lsp-server = "0.7"
+url = "2.5"
+
+# Профиль для финального релиза (медленная сборка, максимальная оптимизация)
+[profile.release]
+lto = "fat"
+codegen-units = 16
+strip = "symbols"
+
+# Профиль для быстрой разработки с оптимизациями (используйте: cargo build --profile release-dev)
+[profile.release-dev]
+inherits = "release"
+lto = "thin"           # Быстрее чем "fat", но все еще оптимизирует
+codegen-units = 16     # Параллельная кодогенерация (по умолчанию 16)
+strip = "symbols"      # Убираем отладочные символы
+incremental = true     # Инкрементальная компиляция
+
+# Альтернатива: оптимизированный dev-профиль (используйте: cargo build)
+[profile.dev]
+opt-level = 1          # Базовая оптимизация для приемлемой производительности
+incremental = true     # Инкрементальная компиляция
+
+# Оптимизируем зависимости даже в dev режиме для лучшей производительности
+[profile.dev.package."*"]
+opt-level = 2

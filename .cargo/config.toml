@@ -1,0 +1,38 @@
+# Оптимизация сборки для Arch Linux
+
+[build]
+# Параллельные задачи (измените на количество ваших CPU ядер)
+jobs = 16
+
+# Кэширование компиляции (если установлен sccache)
+# Раскомментируйте после: sudo pacman -S sccache
+rustc-wrapper = "sccache"
+
+[target.x86_64-unknown-linux-gnu]
+# Используем mold - самый быстрый линковщик
+# Установите: sudo pacman -S mold
+linker = "clang"
+rustflags = [
+    "-C", "link-arg=-fuse-ld=mold",
+    "-C", "target-cpu=znver3",           # Zen 3 архитектура (Ryzen 5800HS)
+    "-C", "target-feature=+avx2,+fma",   # SIMD оптимизации
+]
+
+# Альтернатива: lld (если mold недоступен)
+# Установите: sudo pacman -S lld
+# rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+# Дополнительные оптимизации для CPU
+# Раскомментируйте для native оптимизаций под ваш процессор:
+# rustflags = [
+#     "-C", "link-arg=-fuse-ld=mold",
+#     "-C", "target-cpu=native",
+# ]
+
+# Cargo aliases для быстрой разработки
+[alias]
+bdev = "build --no-default-features"           # Сборка без GPU feature
+cdev = "check --no-default-features"           # Быстрая проверка без GPU
+bfast = "build --profile release-dev"          # Быстрая оптимизированная сборка
+cfast = "check --profile release-dev"          # Проверка с оптимизациями
+timing = "build --timings"                     # Сборка с отчётом времени компиляции

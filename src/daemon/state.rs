@@ -1,0 +1,603 @@
+//! Daemon state — holds global resources and per-project state.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+
+use anyhow::Result;
+use tokio::sync::{broadcast, mpsc, Mutex, RwLock, Semaphore};
+use tokio_util::sync::CancellationToken;
+
+use super::registry::{ProjectRecord, RegistryDb};
+use crate::cache::CacheManager;
+use crate::resource_limits::ResourceLimits;  // Feature 015
+use crate::error_recovery::CircuitBreaker;  // Feature 016
+use crate::indexer::{
+    load_config, start_watcher, EmbedderPool, IndexTask, IndexerService, Reranker, goferConfig,
+};
+use crate::indexer::summarizer::{SummarizerConfig, summary_worker};
+use crate::languages::LanguageService;
+use crate::storage::{LanceStorage, SqliteStorage};
+
+/// Global daemon state — lives for the lifetime of the daemon process.
+pub struct DaemonState {
+    /// Global home directory (~/.gofer/)
+    pub gofer_home: PathBuf,
+    /// Project registry
+    pub registry: RegistryDb,
+    /// Shared embedding pool (N instances, Arc-shared across all projects)
+    pub embedder: Arc<EmbedderPool>,
+    /// Shared reranker (optional, read-only after init)
+    pub reranker: Arc<Option<Reranker>>,
+    /// Active projects keyed by project UUID
+    pub projects: RwLock<HashMap<String, Arc<ProjectState>>>,
+    /// Daemon start time
+    pub started_at: Instant,
+    /// Sync progress (shared with pipeline)
+    pub sync_progress: Arc<SyncProgress>,
+    /// Cancellation token for graceful shutdown
+    pub shutdown_token: CancellationToken,
+    /// Max concurrent connections semaphore
+    pub connection_semaphore: Arc<Semaphore>,
+    /// Runtime metrics (lock-free counters)
+    pub metrics: Arc<DaemonMetrics>,
+    /// Broadcast channel for server-to-client notifications (e.g. tools/list_changed)
+    pub notify_tx: broadcast::Sender<String>,
+    /// Resource limits for connection pooling and request throttling (Feature 015)
+    pub resource_limits: Arc<ResourceLimits>,
+    /// Circuit breaker for embedding API (Feature 016)
+    pub embedding_circuit: Arc<CircuitBreaker>,
+    /// Circuit breaker for vector search (Feature 016)
+    pub vector_circuit: Arc<CircuitBreaker>,
+}
+
+/// Lock-free runtime metrics for the daemon process.
+pub struct DaemonMetrics {
+    /// Total files indexed (cumulative across all syncs)
+    pub total_files_indexed: AtomicUsize,
+    /// Total chunks embedded (cumulative)
+    pub total_chunks_embedded: AtomicUsize,
+    /// Total search queries served
+    pub queries_served: AtomicUsize,
+    /// Cumulative query latency in microseconds (divide by queries_served for avg)
+    pub query_latency_us: AtomicUsize,
+    /// Last full sync duration in milliseconds
+    pub last_sync_duration_ms: AtomicUsize,
+    /// Number of full syncs completed
+    pub syncs_completed: AtomicUsize,
+}
+
+impl DaemonMetrics {
+    pub fn new() -> Self {
+        Self {
+            total_files_indexed: AtomicUsize::new(0),
+            total_chunks_embedded: AtomicUsize::new(0),
+            queries_served: AtomicUsize::new(0),
+            query_latency_us: AtomicUsize::new(0),
+            last_sync_duration_ms: AtomicUsize::new(0),
+            syncs_completed: AtomicUsize::new(0),
+        }
+    }
+
+    pub fn record_query(&self, latency_us: usize) {
+        self.queries_served.fetch_add(1, Ordering::Relaxed);
+        self.query_latency_us.fetch_add(latency_us, Ordering::Relaxed);
+    }
+
+    pub fn record_sync(&self, files: usize, chunks: usize, duration_ms: usize) {
+        self.total_files_indexed.fetch_add(files, Ordering::Relaxed);
+        self.total_chunks_embedded.fetch_add(chunks, Ordering::Relaxed);
+        self.last_sync_duration_ms.store(duration_ms, Ordering::Relaxed);
+        self.syncs_completed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn snapshot(&self) -> serde_json::Value {
+        let queries = self.queries_served.load(Ordering::Relaxed);
+        let latency_total = self.query_latency_us.load(Ordering::Relaxed);
+        let avg_latency_us = if queries > 0 { latency_total / queries } else { 0 };
+
+        serde_json::json!({
+            "total_files_indexed": self.total_files_indexed.load(Ordering::Relaxed),
+            "total_chunks_embedded": self.total_chunks_embedded.load(Ordering::Relaxed),
+            "queries_served": queries,
+            "avg_query_latency_us": avg_latency_us,
+            "last_sync_duration_ms": self.last_sync_duration_ms.load(Ordering::Relaxed),
+            "syncs_completed": self.syncs_completed.load(Ordering::Relaxed),
+        })
+    }
+
+    /// Export metrics in Prometheus text exposition format.
+    pub fn to_prometheus(&self) -> String {
+        let queries = self.queries_served.load(Ordering::Relaxed);
+        let latency_total = self.query_latency_us.load(Ordering::Relaxed);
+        let avg_latency = if queries > 0 { latency_total / queries } else { 0 };
+
+        format!(
+            "# HELP gofer_files_indexed_total Total files indexed.\n\
+             # TYPE gofer_files_indexed_total counter\n\
+             gofer_files_indexed_total {}\n\
+             # HELP gofer_chunks_embedded_total Total chunks embedded.\n\
+             # TYPE gofer_chunks_embedded_total counter\n\
+             gofer_chunks_embedded_total {}\n\
+             # HELP gofer_queries_served_total Total search queries served.\n\
+             # TYPE gofer_queries_served_total counter\n\
+             gofer_queries_served_total {}\n\
+             # HELP gofer_query_latency_avg_us Average query latency in microseconds.\n\
+             # TYPE gofer_query_latency_avg_us gauge\n\
+             gofer_query_latency_avg_us {}\n\
+             # HELP gofer_last_sync_duration_ms Duration of last sync in milliseconds.\n\
+             # TYPE gofer_last_sync_duration_ms gauge\n\
+             gofer_last_sync_duration_ms {}\n\
+             # HELP gofer_syncs_completed_total Total syncs completed.\n\
+             # TYPE gofer_syncs_completed_total counter\n\
+             gofer_syncs_completed_total {}\n",
+            self.total_files_indexed.load(Ordering::Relaxed),
+            self.total_chunks_embedded.load(Ordering::Relaxed),
+            queries,
+            avg_latency,
+            self.last_sync_duration_ms.load(Ordering::Relaxed),
+            self.syncs_completed.load(Ordering::Relaxed),
+        )
+    }
+}
+
+/// Progress tracking for sync pipeline — uses atomics for lock-free reads.
+pub struct SyncProgress {
+    pub active: AtomicBool,
+    pub stage: Mutex<String>,
+    pub files_total: AtomicUsize,
+    pub files_scanned: AtomicUsize,
+    pub files_parsed: AtomicUsize,
+    pub chunks_embedded: AtomicUsize,
+    pub files_written: AtomicUsize,
+}
+
+impl SyncProgress {
+    pub fn new() -> Self {
+        Self {
+            active: AtomicBool::new(false),
+            stage: Mutex::new(String::new()),
+            files_total: AtomicUsize::new(0),
+            files_scanned: AtomicUsize::new(0),
+            files_parsed: AtomicUsize::new(0),
+            chunks_embedded: AtomicUsize::new(0),
+            files_written: AtomicUsize::new(0),
+        }
+    }
+
+    pub fn reset(&self) {
+        self.active.store(true, Ordering::Relaxed);
+        self.files_total.store(0, Ordering::Relaxed);
+        self.files_scanned.store(0, Ordering::Relaxed);
+        self.files_parsed.store(0, Ordering::Relaxed);
+        self.chunks_embedded.store(0, Ordering::Relaxed);
+        self.files_written.store(0, Ordering::Relaxed);
+    }
+
+    pub fn finish(&self) {
+        self.active.store(false, Ordering::Relaxed);
+    }
+
+    pub fn snapshot(&self) -> SyncProgressSnapshot {
+        SyncProgressSnapshot {
+            active: self.active.load(Ordering::Relaxed),
+            files_total: self.files_total.load(Ordering::Relaxed),
+            files_scanned: self.files_scanned.load(Ordering::Relaxed),
+            files_parsed: self.files_parsed.load(Ordering::Relaxed),
+            chunks_embedded: self.chunks_embedded.load(Ordering::Relaxed),
+            files_written: self.files_written.load(Ordering::Relaxed),
+        }
+    }
+}
+
+/// Immutable snapshot for serialization.
+pub struct SyncProgressSnapshot {
+    pub active: bool,
+    pub files_total: usize,
+    pub files_scanned: usize,
+    pub files_parsed: usize,
+    pub chunks_embedded: usize,
+    pub files_written: usize,
+}
+
+/// Per-project resources loaded into daemon memory.
+pub struct ProjectState {
+    pub id: String,
+    pub path: PathBuf,
+    pub name: String,
+    pub sqlite: SqliteStorage,
+    pub lance: Arc<Mutex<LanceStorage>>,
+    pub task_tx: mpsc::Sender<IndexTask>,
+    pub language_services: Arc<Vec<Box<dyn LanguageService>>>,
+    /// Whether a file watcher is active
+    pub watcher_active: Mutex<bool>,
+    /// Cancellation token for stopping this project's background tasks
+    pub cancel: CancellationToken,
+    /// Cache manager for this project
+    pub cache: Arc<CacheManager>,
+    /// rust-analyzer instance for this project (lazy-loaded)
+    pub rust_analyzer: Arc<RwLock<Option<Arc<crate::languages::rust_analyzer::RustAnalyzer>>>>,
+}
+
+impl DaemonState {
+    /// Create a new DaemonState, loading the global embedder and reranker.
+    pub async fn new(gofer_home: PathBuf) -> Result<Self> {
+        let registry_path = gofer_home.join("registry.sqlite");
+        let registry_path_str = registry_path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid registry path: non-UTF8 characters"))?;
+        let registry = RegistryDb::new(registry_path_str).await?;
+
+        // Try to load global config from ~/.gofer/config.toml (not .gofer/config.toml)
+        let global_config_path = gofer_home.join("config.toml");
+        let config = if global_config_path.exists() {
+            tracing::info!("Loading global config from {:?}", global_config_path);
+            load_config(&gofer_home)
+        } else {
+            tracing::info!("No global config found, using defaults");
+            goferConfig::default()
+        };
+
+        tracing::info!("Loading embedding pool...");
+        let embedder = EmbedderPool::with_config(1, &config.embedding)?;  // Start with 1 instance, scale up for indexing
+
+        let reranker = match Reranker::new() {
+            Ok(r) => {
+                tracing::info!("Reranker loaded");
+                Some(r)
+            }
+            Err(e) => {
+                tracing::warn!("Reranker not available: {}", e);
+                None
+            }
+        };
+
+        let (notify_tx, _) = broadcast::channel::<String>(64);
+
+        // Feature 016: Circuit breakers for external services
+        // Embedding API: 5 failures, 2 successes to recover, 30s timeout
+        let embedding_circuit = Arc::new(CircuitBreaker::new(
+            5,
+            2,
+            std::time::Duration::from_secs(30),
+        ));
+
+        // Vector search: 3 failures, 1 success to recover, 10s timeout
+        let vector_circuit = Arc::new(CircuitBreaker::new(
+            3,
+            1,
+            std::time::Duration::from_secs(10),
+        ));
+
+        Ok(Self {
+            gofer_home,
+            registry,
+            embedder: Arc::new(embedder),
+            reranker: Arc::new(reranker),
+            projects: RwLock::new(HashMap::new()),
+            started_at: Instant::now(),
+            sync_progress: Arc::new(SyncProgress::new()),
+            shutdown_token: CancellationToken::new(),
+            connection_semaphore: Arc::new(Semaphore::new(256)),
+            metrics: Arc::new(DaemonMetrics::new()),
+            notify_tx,
+            resource_limits: Arc::new(ResourceLimits::default()),  // Feature 015
+            embedding_circuit,  // Feature 016
+            vector_circuit,  // Feature 016
+        })
+    }
+
+    /// Resolve a project path to a loaded ProjectState, loading it on demand.
+    pub async fn get_or_load_project(&self, project_path: &str) -> Result<Arc<ProjectState>> {
+        // Fast path: already loaded
+        {
+            let projects = self.projects.read().await;
+            for ps in projects.values() {
+                if ps.path == Path::new(project_path) {
+                    return Ok(ps.clone());
+                }
+            }
+        }
+
+        // Must be registered
+        let record = self
+            .registry
+            .get_by_path(project_path)
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Project not registered: {}. Run 'gofer init' in the project directory first.",
+                    project_path
+                )
+            })?;
+
+        self.registry.update_last_opened(&record.id).await?;
+        self.load_project(&record).await
+    }
+
+    /// Load a project into memory given its registry record.
+    async fn load_project(&self, record: &ProjectRecord) -> Result<Arc<ProjectState>> {
+        let index_dir = self.gofer_home.join("indices").join(&record.id);
+        tokio::fs::create_dir_all(&index_dir).await?;
+
+        // Load config from project root to respect settings (e.g. parallel_workers)
+        let root_path = PathBuf::from(&record.path);
+        let gofer_dir = root_path.join(".gofer");
+        let config = load_config(&gofer_dir);
+        let workers = config.indexer.parallel_workers.unwrap_or(4);
+
+        let db_path = index_dir.join("graph.db");
+        let lance_path = index_dir.join("lancedb");
+
+        let db_path_str = db_path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid SQLite path: non-UTF8 characters in {:?}", db_path))?;
+        let sqlite = SqliteStorage::new(db_path_str).await?;
+        sqlite.migrate().await?;
+
+        // Run integrity check on SQLite database
+        if let Err(e) = sqlite.check_integrity().await {
+            tracing::error!("SQLite integrity check failed for project {}: {}", record.id, e);
+            // Continue anyway - the database may still be usable
+        }
+
+        // C4: Recover summary queue items stuck in 'processing' from a previous crash
+        let recovered = sqlite.recover_summary_queue().await?;
+        if recovered > 0 {
+            tracing::info!("Recovered {} stuck summary queue items → pending", recovered);
+        }
+
+        // C3: Invalidate chunk embedding cache if the model changed since last index
+        let cache_version_key = "embedding_cache_version";
+        let current_version = self.embedder.cache_version_key();
+        match sqlite.get_index_meta(cache_version_key).await? {
+            Some(stored) if stored == current_version => {}
+            Some(old_version) => {
+                tracing::warn!(
+                    "Embedding model changed ({} → {}), clearing chunk cache",
+                    old_version,
+                    current_version
+                );
+                sqlite.clear_chunk_cache().await?;
+                sqlite.set_index_meta(cache_version_key, &current_version).await?;
+            }
+            None => {
+                sqlite.set_index_meta(cache_version_key, &current_version).await?;
+            }
+        }
+
+        let lance_path_str = lance_path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid LanceDB path: non-UTF8 characters in {:?}", lance_path))?;
+        let lance_storage = LanceStorage::new(lance_path_str, self.embedder.dimension()).await?;
+
+        // Run health check on LanceDB
+        if let Err(e) = lance_storage.health_check().await {
+            tracing::error!("LanceDB health check failed for project {}: {}", record.id, e);
+            // Continue anyway - the database may still be usable
+        }
+
+        let lance = Arc::new(Mutex::new(lance_storage));
+
+        let (task_tx, task_rx) = mpsc::channel::<IndexTask>(100);
+
+        let language_services = Arc::new(init_language_services(&sqlite, &root_path));
+
+        let project_cancel = CancellationToken::new();
+
+        // Create cache manager for this project
+        let cache = Arc::new(CacheManager::new());
+
+        let state = Arc::new(ProjectState {
+            id: record.id.clone(),
+            path: root_path.clone(),
+            name: record.name.clone(),
+            sqlite: sqlite.clone(),
+            lance: lance.clone(),
+            task_tx,
+            language_services,
+            watcher_active: Mutex::new(false),
+            cancel: project_cancel,
+            cache: cache.clone(),
+            rust_analyzer: Arc::new(RwLock::new(None)),
+        });
+
+        // Spawn indexer worker — shares lance + embedder pool via Arc
+        // Feature 012: Pass cache for invalidation on file changes
+        // Use configured parallel workers
+        let indexer = IndexerService::new(sqlite, lance, self.embedder.clone(), workers)
+            .with_cache(cache);
+
+        tokio::spawn(async move {
+            indexer.run(task_rx).await;
+        });
+
+        // Store in map
+        let mut projects = self.projects.write().await;
+        projects.insert(record.id.clone(), state.clone());
+
+        tracing::info!("Loaded project: {} ({})", record.name, record.path);
+
+        // Notify connected clients that the tool list may have changed
+        if !state.language_services.is_empty() {
+            let notif = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/tools/list_changed"
+            });
+            let _ = self.notify_tx.send(notif.to_string());
+        }
+
+        Ok(state)
+    }
+
+    /// Activate a project: load + full_sync + start watcher.
+    pub async fn activate_project(
+        &self,
+        project_path: &str,
+        watch: bool,
+    ) -> Result<String> {
+        let record = self
+            .registry
+            .get_by_path(project_path)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Project not registered: {}", project_path))?;
+
+        let project = self.get_or_load_project(project_path).await?;
+
+        // Run full sync
+        let index_dir = self.gofer_home.join("indices").join(&record.id);
+
+        // Load config from project dir (or index dir)
+        let config_path = index_dir.join("config.toml");
+        let gofer_dir = if config_path.exists() {
+            index_dir.clone()
+        } else {
+            // Fallback: check project root for .gofer/config.toml
+            PathBuf::from(project_path).join(".gofer")
+        };
+        let config = load_config(&gofer_dir);
+        let ignore_patterns = config.indexer.ignore.clone();
+        let workers = config.indexer.parallel_workers.unwrap_or(4);
+
+        // Full sync using shared lance + embedder pool (no redundant instances)
+        // Note: parallel_workers here is for consistency, full_sync uses internal pipeline
+        let sync_indexer = IndexerService::new(
+            project.sqlite.clone(),
+            project.lance.clone(),
+            self.embedder.clone(),
+            workers,
+        );
+
+        let root = PathBuf::from(project_path);
+        sync_indexer.full_sync(&root, &ignore_patterns, Some(self.sync_progress.clone()), Some(self.metrics.clone())).await?;
+
+        // Spawn summarizer background worker (if LLM enabled)
+        let summarizer_config = SummarizerConfig::from_toml(&config.summarizer);
+        if summarizer_config.enable_llm {
+            let cancel = self.shutdown_token.clone();
+            let sqlite_sum = project.sqlite.clone();
+            tokio::spawn(async move {
+                summary_worker(summarizer_config, sqlite_sum, cancel).await;
+            });
+        }
+
+        // Start watcher if requested
+        if watch {
+            let mut watcher_active = project.watcher_active.lock().await;
+            if !*watcher_active {
+                let watcher_root = root.clone();
+                let watcher_tx = project.task_tx.clone();
+                let watcher_ignores = ignore_patterns;
+                let watcher_cancel = project.cancel.clone();
+                tokio::spawn(async move {
+                    start_watcher(watcher_root, watcher_tx, watcher_ignores, watcher_cancel).await;
+                });
+                *watcher_active = true;
+                tracing::info!("Watcher started for {}", project_path);
+            }
+        }
+
+        Ok(format!(
+            "Project '{}' activated{}",
+            record.name,
+            if watch { " with watcher" } else { "" }
+        ))
+    }
+
+    /// Deactivate a project: stop watcher, remove from memory.
+    pub async fn deactivate_project(&self, project_path: &str) -> Result<()> {
+        let mut projects = self.projects.write().await;
+        let id_to_remove = projects
+            .iter()
+            .find(|(_, ps)| ps.path == Path::new(project_path))
+            .map(|(id, _)| id.clone());
+
+        if let Some(id) = id_to_remove {
+            if let Some(ps) = projects.remove(&id) {
+                // Stop rust-analyzer if running
+                if let Some(ra) = ps.rust_analyzer.write().await.take() {
+                    let _ = ra.stop().await;
+                }
+                ps.cancel.cancel();
+            }
+            tracing::info!("Deactivated project: {}", project_path);
+        }
+        Ok(())
+    }
+
+    /// Get or start rust-analyzer instance for a project.
+    #[allow(dead_code)]
+    pub async fn get_rust_analyzer(
+        &self,
+        project_path: &str,
+    ) -> Result<Arc<crate::languages::rust_analyzer::RustAnalyzer>> {
+        let project = self.get_or_load_project(project_path).await?;
+
+        // Fast path: already initialized
+        {
+            let ra_guard = project.rust_analyzer.read().await;
+            if let Some(ra) = ra_guard.as_ref() {
+                if ra.is_ready().await {
+                    return Ok(ra.clone());
+                }
+            }
+        }
+
+        // Slow path: initialize rust-analyzer
+        let mut ra_guard = project.rust_analyzer.write().await;
+
+        // Double-check in case another task initialized it while we were waiting
+        if let Some(ra) = ra_guard.as_ref() {
+            if ra.is_ready().await {
+                return Ok(ra.clone());
+            }
+        }
+
+        // Start new instance
+        let ra = Arc::new(crate::languages::rust_analyzer::RustAnalyzer::new(
+            project.path.clone(),
+        ));
+
+        ra.start().await?;
+        *ra_guard = Some(ra.clone());
+
+        Ok(ra)
+    }
+}
+
+/// Initialize language services for a project.
+fn init_language_services(
+    sqlite: &SqliteStorage,
+    root_path: &Path,
+) -> Vec<Box<dyn LanguageService>> {
+    let mut services: Vec<Box<dyn LanguageService>> = Vec::new();
+
+    let rust_svc = crate::languages::rust::RustService::new(sqlite.clone());
+    if rust_svc.is_applicable(root_path) {
+        services.push(Box::new(rust_svc));
+    }
+
+    let vue_svc = crate::languages::vue::VueService::new(sqlite.clone());
+    if vue_svc.is_applicable(root_path) {
+        services.push(Box::new(vue_svc));
+    }
+
+    let ts_svc = crate::languages::typescript::TypeScriptService::new(sqlite.clone(), root_path);
+    if ts_svc.is_applicable(root_path) {
+        services.push(Box::new(ts_svc));
+    }
+
+    let py_svc = crate::languages::python::PythonService::new(sqlite.clone(), root_path);
+    if py_svc.is_applicable(root_path) {
+        services.push(Box::new(py_svc));
+    }
+
+    let go_svc = crate::languages::go::GoService::new(sqlite.clone());
+    if go_svc.is_applicable(root_path) {
+        services.push(Box::new(go_svc));
+    }
+
+    services
+}
