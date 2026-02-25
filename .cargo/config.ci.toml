@@ -1,0 +1,14 @@
+# CI-friendly Cargo configuration
+# This file is used in GitHub Actions where mold/sccache are not available
+
+[build]
+# Reasonable parallelism for CI
+jobs = 4
+
+# No wrapper in CI (sccache not installed)
+# rustc-wrapper is disabled via environment variable
+
+[target.x86_64-unknown-linux-gnu]
+# Use standard linker in CI (no mold)
+linker = "cc"
+# No custom rustflags - use default for compatibility
