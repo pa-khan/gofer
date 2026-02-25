@@ -36,7 +36,7 @@ pub struct ContentBuffer {
 
 // Global buffer storage (in-memory for Phase 3)
 lazy_static::lazy_static! {
-    static ref BUFFERS: Arc<RwLock<HashMap<String, ContentBuffer>>> = 
+    static ref BUFFERS: Arc<RwLock<HashMap<String, ContentBuffer>>> =
         Arc::new(RwLock::new(HashMap::new()));
 }
 
@@ -54,12 +54,14 @@ pub async fn tool_extract_to_hash(args: Value, ctx: &ToolContext) -> Result<Valu
     let start_line = args
         .get("start_line")
         .and_then(|v| v.as_u64())
-        .ok_or_else(|| goferError::InvalidParams("start_line is required".into()))? as usize;
+        .ok_or_else(|| goferError::InvalidParams("start_line is required".into()))?
+        as usize;
 
     let end_line = args
         .get("end_line")
         .and_then(|v| v.as_u64())
-        .ok_or_else(|| goferError::InvalidParams("end_line is required".into()))? as usize;
+        .ok_or_else(|| goferError::InvalidParams("end_line is required".into()))?
+        as usize;
 
     let cut = args.get("cut").and_then(|v| v.as_bool()).unwrap_or(false);
 
@@ -184,7 +186,8 @@ pub async fn tool_insert_hash(args: Value, ctx: &ToolContext) -> Result<Value> {
     let line_number = args
         .get("line_number")
         .and_then(|v| v.as_u64())
-        .ok_or_else(|| goferError::InvalidParams("line_number is required".into()))? as usize;
+        .ok_or_else(|| goferError::InvalidParams("line_number is required".into()))?
+        as usize;
 
     let hash_id = args
         .get("hash_id")
@@ -200,9 +203,7 @@ pub async fn tool_insert_hash(args: Value, ctx: &ToolContext) -> Result<Value> {
 
         // Check expiration
         if Utc::now() > buffer.expires_at {
-            return Err(
-                goferError::InvalidParams(format!("Hash expired: {}", hash_id)).into()
-            );
+            return Err(goferError::InvalidParams(format!("Hash expired: {}", hash_id)).into());
         }
 
         // Increment access count
@@ -238,12 +239,12 @@ pub async fn tool_insert_hash(args: Value, ctx: &ToolContext) -> Result<Value> {
 
     // Write back
     let new_content = lines.join("\n");
-    
+
     // Create parent directories if needed
     if let Some(parent) = abs_path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
-    
+
     tokio::fs::write(&abs_path, new_content).await?;
 
     // Invalidate cache
@@ -268,12 +269,14 @@ pub async fn tool_replace_with_hash(args: Value, ctx: &ToolContext) -> Result<Va
     let start_line = args
         .get("start_line")
         .and_then(|v| v.as_u64())
-        .ok_or_else(|| goferError::InvalidParams("start_line is required".into()))? as usize;
+        .ok_or_else(|| goferError::InvalidParams("start_line is required".into()))?
+        as usize;
 
     let end_line = args
         .get("end_line")
         .and_then(|v| v.as_u64())
-        .ok_or_else(|| goferError::InvalidParams("end_line is required".into()))? as usize;
+        .ok_or_else(|| goferError::InvalidParams("end_line is required".into()))?
+        as usize;
 
     let hash_id = args
         .get("hash_id")
@@ -288,9 +291,7 @@ pub async fn tool_replace_with_hash(args: Value, ctx: &ToolContext) -> Result<Va
             .ok_or_else(|| goferError::InvalidParams(format!("Hash not found: {}", hash_id)))?;
 
         if Utc::now() > buffer.expires_at {
-            return Err(
-                goferError::InvalidParams(format!("Hash expired: {}", hash_id)).into()
-            );
+            return Err(goferError::InvalidParams(format!("Hash expired: {}", hash_id)).into());
         }
 
         buffer.access_count += 1;

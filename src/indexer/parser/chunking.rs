@@ -1,8 +1,8 @@
 use regex::Regex;
 use tree_sitter::{Node, Parser};
 
+use super::core::{ParserError, Result, SupportedLanguage};
 use crate::models::{CodeChunk, SymbolKind};
-use super::core::{SupportedLanguage, ParserError, Result};
 
 // === Семантический AST-чанкинг (Smart Chunking) ===
 
@@ -37,7 +37,11 @@ fn smart_chunk_vue(code: &str, file_path: &str) -> Result<Vec<CodeChunk>> {
     let script_body = caps.get(1).unwrap();
     let line_offset = code[..script_body.start()].lines().count() as u32;
 
-    let mut chunks = smart_chunk_internal(script_body.as_str(), file_path, SupportedLanguage::TypeScript)?;
+    let mut chunks = smart_chunk_internal(
+        script_body.as_str(),
+        file_path,
+        SupportedLanguage::TypeScript,
+    )?;
 
     for chunk in &mut chunks {
         chunk.line_start += line_offset;
@@ -69,7 +73,6 @@ pub(crate) fn smart_chunk_from_root(
     file_path: &str,
     language: SupportedLanguage,
 ) -> Result<Vec<CodeChunk>> {
-
     let mut chunks = Vec::new();
     let mut accumulator = ChunkAccumulator::new(file_path, code);
 
@@ -85,7 +88,9 @@ pub(crate) fn smart_chunk_from_root(
                 accumulator.flush(&mut chunks);
                 // Разбиваем oversized-узел
                 chunk_oversized_node(child, code, file_path, language, &[], &mut chunks);
-            } else if accumulator.size + node_size > MAX_CHUNK_BYTES && accumulator.size >= MIN_CHUNK_BYTES {
+            } else if accumulator.size + node_size > MAX_CHUNK_BYTES
+                && accumulator.size >= MIN_CHUNK_BYTES
+            {
                 // Не влезает — сбрасываем буфер и начинаем новый
                 accumulator.flush(&mut chunks);
                 accumulator.push_node(child, code, language);
@@ -251,7 +256,10 @@ fn chunk_oversized_node(
         // Прописываем scopes в созданных чанках
         acc.flush(chunks);
         let chunk_count = chunks.len();
-        for chunk in chunks.iter_mut().skip(chunk_count.saturating_sub(node.child_count())) {
+        for chunk in chunks
+            .iter_mut()
+            .skip(chunk_count.saturating_sub(node.child_count()))
+        {
             if chunk.scopes.is_empty() {
                 chunk.scopes = scopes.clone();
             }
@@ -292,7 +300,10 @@ fn chunk_oversized_node(
                 chunk_text.to_string()
             };
 
-            let line_end = chunk_line_start + (node_text[current_start..current_start + current_size].lines().count() as u32);
+            let line_end = chunk_line_start
+                + (node_text[current_start..current_start + current_size]
+                    .lines()
+                    .count() as u32);
 
             chunks.push(CodeChunk {
                 id: format!("{}:{}:{}", file_path, chunk_line_start, line_end),
@@ -422,30 +433,37 @@ fn extract_node_meta(
 
     // Определяем человекочитаемый тип
     let sym_kind = match kind_str {
-        "function_item" | "function_declaration" | "function_definition" => Some(SymbolKind::Function),
+        "function_item" | "function_declaration" | "function_definition" => {
+            Some(SymbolKind::Function)
+        }
         "struct_item" => Some(SymbolKind::Struct),
         "enum_item" | "enum_declaration" => Some(SymbolKind::Enum),
         "impl_item" => Some(SymbolKind::Impl),
         "trait_item" => Some(SymbolKind::Trait),
-        "class_declaration" | "class_definition" | "abstract_class_declaration" => Some(SymbolKind::Struct), // Classes as structs
+        "class_declaration" | "class_definition" | "abstract_class_declaration" => {
+            Some(SymbolKind::Struct)
+        } // Classes as structs
         "interface_declaration" => Some(SymbolKind::Trait), // Interfaces as traits
         "type_alias_declaration" | "type_item" => Some(SymbolKind::Type),
         "const_item" | "lexical_declaration" | "const_declaration" => Some(SymbolKind::Const),
         "method_definition" | "method_declaration" => Some(SymbolKind::Function), // Methods as functions
-        "var_declaration" => Some(SymbolKind::Const), // Var as const
+        "var_declaration" => Some(SymbolKind::Const),                             // Var as const
         "type_declaration" => {
             // Go type_declaration — look inside for struct/interface
             for i in 0..node.child_count() {
                 if let Some(child) = node.child(i) {
                     if child.kind() == "type_spec" {
-                        let name = child.child_by_field_name("name")
+                        let name = child
+                            .child_by_field_name("name")
                             .map(|n| code[n.byte_range()].to_string());
                         let inner_type = child.child_by_field_name("type");
-                        let kind = inner_type.map(|t| match t.kind() {
-                            "struct_type" => SymbolKind::Struct,
-                            "interface_type" => SymbolKind::Trait,
-                            _ => SymbolKind::Type,
-                        }).unwrap_or(SymbolKind::Type);
+                        let kind = inner_type
+                            .map(|t| match t.kind() {
+                                "struct_type" => SymbolKind::Struct,
+                                "interface_type" => SymbolKind::Trait,
+                                _ => SymbolKind::Type,
+                            })
+                            .unwrap_or(SymbolKind::Type);
                         return (name, Some(kind), None);
                     }
                 }

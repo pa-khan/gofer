@@ -1,7 +1,7 @@
+use super::common::ToolContext;
+use crate::error::goferError;
 use anyhow::Result;
 use serde_json::{json, Value};
-use crate::error::goferError;
-use super::common::ToolContext;
 
 pub async fn tool_get_index_status(ctx: &ToolContext) -> Result<Value> {
     use std::time::Instant;
@@ -31,7 +31,7 @@ pub async fn tool_get_index_status(ctx: &ToolContext) -> Result<Value> {
         SELECT key, value
         FROM index_metadata
         WHERE key IN ('last_full_sync', 'indexing_started_at', 'indexing_completed_at')
-        "#
+        "#,
     )
     .fetch_all(ctx.sqlite.pool())
     .await?;
@@ -54,7 +54,7 @@ pub async fn tool_get_index_status(ctx: &ToolContext) -> Result<Value> {
         FROM files
         WHERE indexing_status IS NOT NULL
         GROUP BY indexing_status
-        "#
+        "#,
     )
     .fetch_all(ctx.sqlite.pool())
     .await?;
@@ -116,7 +116,7 @@ pub async fn tool_get_index_status(ctx: &ToolContext) -> Result<Value> {
         SELECT kind, COUNT(*) as count
         FROM symbols
         GROUP BY kind
-        "#
+        "#,
     )
     .fetch_all(ctx.sqlite.pool())
     .await?;
@@ -125,7 +125,7 @@ pub async fn tool_get_index_status(ctx: &ToolContext) -> Result<Value> {
     for row in symbol_breakdown {
         symbols_by_kind.insert(
             row.kind.clone(),
-            serde_json::Value::Number(row.count.into())
+            serde_json::Value::Number(row.count.into()),
         );
     }
 
@@ -182,7 +182,8 @@ pub async fn tool_get_index_status(ctx: &ToolContext) -> Result<Value> {
             "message": format!("Low embedding ratio: {:.2} chunks per file", embedding_ratio),
             "ratio": embedding_ratio
         }));
-        recommendations.push("Some files may lack embeddings. Run validate_index for details".to_string());
+        recommendations
+            .push("Some files may lack embeddings. Run validate_index for details".to_string());
     }
 
     if warnings.is_empty() {
@@ -255,7 +256,7 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
         WHERE s.id IS NULL
         AND f.language IN ('rust', 'typescript', 'python', 'go', 'javascript')
         LIMIT 20
-        "#
+        "#,
     )
     .fetch_all(ctx.sqlite.pool())
     .await?;
@@ -264,11 +265,13 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
         let sample_files: Vec<Value> = files_without_symbols
             .iter()
             .take(10)
-            .map(|r| json!({
-                "path": r.path,
-                "language": r.language,
-                "last_indexed": r.last_indexed_at
-            }))
+            .map(|r| {
+                json!({
+                    "path": r.path,
+                    "language": r.language,
+                    "last_indexed": r.last_indexed_at
+                })
+            })
             .collect();
 
         issues.push(json!({
@@ -312,7 +315,7 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
         LEFT JOIN files f ON s.file_id = f.id
         WHERE f.id IS NULL
         LIMIT 20
-        "#
+        "#,
     )
     .fetch_all(ctx.sqlite.pool())
     .await?;
@@ -361,7 +364,7 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
         FROM files
         WHERE indexing_status = 'failed'
         LIMIT 20
-        "#
+        "#,
     )
     .fetch_all(ctx.sqlite.pool())
     .await?;
@@ -412,7 +415,7 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
         LEFT JOIN files f ON r.file_id = f.id
         WHERE f.id IS NULL
         LIMIT 20
-        "#
+        "#,
     )
     .fetch_all(ctx.sqlite.pool())
     .await?;
@@ -536,7 +539,7 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
         FROM files
         WHERE last_indexed_at IS NOT NULL
         AND julianday('now') - julianday(last_indexed_at) > ?
-        "#
+        "#,
     )
     .bind(stale_threshold_days)
     .fetch_one(ctx.sqlite.pool())
@@ -596,13 +599,12 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
 }
 
 pub async fn tool_force_reindex(args: Value, ctx: &ToolContext) -> Result<Value> {
-    let scope = args.get("scope")
-        .and_then(|v| v.as_str())
-        .unwrap_or("file");
+    let scope = args.get("scope").and_then(|v| v.as_str()).unwrap_or("file");
 
     match scope {
         "file" => {
-            let path = args.get("path")
+            let path = args
+                .get("path")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("path required for file scope"))?;
 
@@ -613,7 +615,7 @@ pub async fn tool_force_reindex(args: Value, ctx: &ToolContext) -> Result<Value>
                 SET indexing_status = 'pending',
                     last_indexed_at = NULL
                 WHERE path = ?
-                "#
+                "#,
             )
             .bind(path)
             .execute(ctx.sqlite.pool())
@@ -639,7 +641,8 @@ pub async fn tool_force_reindex(args: Value, ctx: &ToolContext) -> Result<Value>
         }
 
         "directory" => {
-            let path = args.get("path")
+            let path = args
+                .get("path")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("path required for directory scope"))?;
 
@@ -650,7 +653,7 @@ pub async fn tool_force_reindex(args: Value, ctx: &ToolContext) -> Result<Value>
                 SET indexing_status = 'pending',
                     last_indexed_at = NULL
                 WHERE path LIKE ?
-                "#
+                "#,
             )
             .bind(&pattern)
             .execute(ctx.sqlite.pool())
@@ -674,7 +677,7 @@ pub async fn tool_force_reindex(args: Value, ctx: &ToolContext) -> Result<Value>
                 UPDATE files
                 SET indexing_status = 'pending',
                     last_indexed_at = NULL
-                "#
+                "#,
             )
             .execute(ctx.sqlite.pool())
             .await?;
@@ -690,7 +693,7 @@ pub async fn tool_force_reindex(args: Value, ctx: &ToolContext) -> Result<Value>
                 ON CONFLICT(key) DO UPDATE SET
                     value = excluded.value,
                     updated_at = CURRENT_TIMESTAMP
-                "#
+                "#,
             )
             .bind(now)
             .execute(ctx.sqlite.pool())
@@ -704,7 +707,7 @@ pub async fn tool_force_reindex(args: Value, ctx: &ToolContext) -> Result<Value>
             }))
         }
 
-        _ => Err(goferError::InvalidParams(format!("Invalid scope: {}", scope)).into())
+        _ => Err(goferError::InvalidParams(format!("Invalid scope: {}", scope)).into()),
     }
 }
 

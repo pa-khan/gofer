@@ -123,9 +123,8 @@ impl RustAnalyzer {
             ..Default::default()
         };
 
-        let _response: InitializeResult = self
-            .send_request("initialize", initialize_params)
-            .await?;
+        let _response: InitializeResult =
+            self.send_request("initialize", initialize_params).await?;
 
         // Send initialized notification
         self.send_notification("initialized", InitializedParams {})
@@ -144,11 +143,13 @@ impl RustAnalyzer {
 
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
-            
+
             loop {
                 match Self::read_message(&mut reader).await {
                     Ok(Some(msg)) => {
-                        if let Err(e) = Self::handle_message(msg, &pending_requests, &diagnostics).await {
+                        if let Err(e) =
+                            Self::handle_message(msg, &pending_requests, &diagnostics).await
+                        {
                             error!("Failed to handle LSP message: {}", e);
                         }
                     }
@@ -168,15 +169,15 @@ impl RustAnalyzer {
     /// Read a single LSP message from stdout.
     async fn read_message(reader: &mut BufReader<ChildStdout>) -> Result<Option<Value>> {
         let mut headers = Vec::new();
-        
+
         loop {
             let mut line = String::new();
             let n = reader.read_line(&mut line).await?;
-            
+
             if n == 0 {
                 return Ok(None); // EOF
             }
-            
+
             if line == "\r\n" {
                 break;
             }
@@ -208,7 +209,7 @@ impl RustAnalyzer {
         if let Some(id_value) = msg.get("id") {
             if let Some(id) = id_value.as_i64() {
                 let mut pending = pending_requests.write().await;
-                
+
                 if let Some(sender) = pending.remove(&(id as i32)) {
                     if let Some(error) = msg.get("error") {
                         let _ = sender.send(Err(anyhow::anyhow!("LSP error: {}", error)));
@@ -244,13 +245,10 @@ impl RustAnalyzer {
     ) -> Result<()> {
         let notification: PublishDiagnosticsParams = serde_json::from_value(params.clone())?;
         let file_path = notification.uri.path().to_string();
-        
+
         let mut diag_map = diagnostics.write().await;
-        diag_map.insert(
-            file_path,
-            notification.diagnostics,
-        );
-        
+        diag_map.insert(file_path, notification.diagnostics);
+
         Ok(())
     }
 
@@ -296,7 +294,7 @@ impl RustAnalyzer {
 
         // Create oneshot channel for response
         let (tx, rx) = oneshot::channel();
-        
+
         // Register pending request
         self.pending_requests.write().await.insert(id, tx);
 
@@ -311,21 +309,15 @@ impl RustAnalyzer {
         drop(stdin_guard);
 
         // Wait for response with timeout
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            rx
-        ).await
+        let result = tokio::time::timeout(std::time::Duration::from_secs(30), rx)
+            .await
             .context("LSP request timeout")??;
 
         Ok(serde_json::from_value(result?)?)
     }
 
     /// Send LSP notification (no response expected).
-    async fn send_notification<P: Serialize>(
-        &self,
-        method: &str,
-        params: P,
-    ) -> Result<()> {
+    async fn send_notification<P: Serialize>(&self, method: &str, params: P) -> Result<()> {
         let notification = serde_json::json!({
             "jsonrpc": "2.0",
             "method": method,
@@ -367,10 +359,7 @@ impl RustAnalyzer {
             .map_err(|e| anyhow::anyhow!("Invalid file path: {}", e))?;
 
         let params = DidChangeTextDocumentParams {
-            text_document: VersionedTextDocumentIdentifier {
-                uri,
-                version,
-            },
+            text_document: VersionedTextDocumentIdentifier { uri, version },
             content_changes: vec![TextDocumentContentChangeEvent {
                 range: None,
                 range_length: None,
@@ -378,7 +367,8 @@ impl RustAnalyzer {
             }],
         };
 
-        self.send_notification("textDocument/didChange", params).await
+        self.send_notification("textDocument/didChange", params)
+            .await
     }
 
     /// Go to definition for a symbol at position.
@@ -404,22 +394,19 @@ impl RustAnalyzer {
             partial_result_params: PartialResultParams::default(),
         };
 
-        let response: Option<GotoDefinitionResponse> = self
-            .send_request("textDocument/definition", params)
-            .await?;
+        let response: Option<GotoDefinitionResponse> =
+            self.send_request("textDocument/definition", params).await?;
 
         match response {
             Some(GotoDefinitionResponse::Scalar(loc)) => Ok(vec![loc]),
             Some(GotoDefinitionResponse::Array(locs)) => Ok(locs),
-            Some(GotoDefinitionResponse::Link(links)) => {
-                Ok(links
-                    .into_iter()
-                    .map(|link| Location {
-                        uri: link.target_uri,
-                        range: link.target_selection_range,
-                    })
-                    .collect())
-            }
+            Some(GotoDefinitionResponse::Link(links)) => Ok(links
+                .into_iter()
+                .map(|link| Location {
+                    uri: link.target_uri,
+                    range: link.target_selection_range,
+                })
+                .collect()),
             None => Ok(vec![]),
         }
     }
@@ -451,9 +438,8 @@ impl RustAnalyzer {
             },
         };
 
-        let response: Option<Vec<Location>> = self
-            .send_request("textDocument/references", params)
-            .await?;
+        let response: Option<Vec<Location>> =
+            self.send_request("textDocument/references", params).await?;
 
         Ok(response.unwrap_or_default())
     }
@@ -487,7 +473,7 @@ impl RustAnalyzer {
     pub async fn diagnostics(&self, file_path: &Path) -> Result<Vec<Diagnostic>> {
         let diag_map = self.diagnostics.read().await;
         let path_str = file_path.to_string_lossy().to_string();
-        
+
         Ok(diag_map.get(&path_str).cloned().unwrap_or_default())
     }
 
@@ -515,9 +501,8 @@ impl RustAnalyzer {
             context: None,
         };
 
-        let response: Option<CompletionResponse> = self
-            .send_request("textDocument/completion", params)
-            .await?;
+        let response: Option<CompletionResponse> =
+            self.send_request("textDocument/completion", params).await?;
 
         match response {
             Some(CompletionResponse::Array(items)) => Ok(items),
@@ -543,15 +528,20 @@ impl RustAnalyzer {
                     .map_err(|e| anyhow::anyhow!("Invalid file path: {}", e))?,
             },
             range: Range {
-                start: Position { line: start_line, character: 0 },
-                end: Position { line: end_line, character: 0 },
+                start: Position {
+                    line: start_line,
+                    character: 0,
+                },
+                end: Position {
+                    line: end_line,
+                    character: 0,
+                },
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
         };
 
-        let response: Option<Vec<InlayHint>> = self
-            .send_request("textDocument/inlayHint", params)
-            .await?;
+        let response: Option<Vec<InlayHint>> =
+            self.send_request("textDocument/inlayHint", params).await?;
 
         Ok(response.unwrap_or_default())
     }
@@ -574,8 +564,14 @@ impl RustAnalyzer {
                     .map_err(|e| anyhow::anyhow!("Invalid file path: {}", e))?,
             },
             range: Range {
-                start: Position { line: start_line, character: 0 },
-                end: Position { line: end_line, character: 0 },
+                start: Position {
+                    line: start_line,
+                    character: 0,
+                },
+                end: Position {
+                    line: end_line,
+                    character: 0,
+                },
             },
             context: CodeActionContext {
                 diagnostics,
@@ -586,9 +582,8 @@ impl RustAnalyzer {
             partial_result_params: PartialResultParams::default(),
         };
 
-        let response: Option<Vec<CodeActionOrCommand>> = self
-            .send_request("textDocument/codeAction", params)
-            .await?;
+        let response: Option<Vec<CodeActionOrCommand>> =
+            self.send_request("textDocument/codeAction", params).await?;
 
         Ok(response.unwrap_or_default())
     }
@@ -646,9 +641,8 @@ impl RustAnalyzer {
             partial_result_params: PartialResultParams::default(),
         };
 
-        let response: Option<Vec<SymbolInformation>> = self
-            .send_request("workspace/symbol", params)
-            .await?;
+        let response: Option<Vec<SymbolInformation>> =
+            self.send_request("workspace/symbol", params).await?;
 
         Ok(response.unwrap_or_default())
     }
@@ -683,15 +677,13 @@ impl RustAnalyzer {
         match response {
             Some(GotoDefinitionResponse::Scalar(loc)) => Ok(vec![loc]),
             Some(GotoDefinitionResponse::Array(locs)) => Ok(locs),
-            Some(GotoDefinitionResponse::Link(links)) => {
-                Ok(links
-                    .into_iter()
-                    .map(|link| Location {
-                        uri: link.target_uri,
-                        range: link.target_selection_range,
-                    })
-                    .collect())
-            }
+            Some(GotoDefinitionResponse::Link(links)) => Ok(links
+                .into_iter()
+                .map(|link| Location {
+                    uri: link.target_uri,
+                    range: link.target_selection_range,
+                })
+                .collect()),
             None => Ok(vec![]),
         }
     }

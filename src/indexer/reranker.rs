@@ -7,8 +7,10 @@ use tokenizers::Tokenizer;
 
 use super::watcher::RerankerConfig;
 
-const DEFAULT_MODEL_URL: &str = "https://huggingface.co/cross-encoder/ms-marco-TinyBERT-L-2-v2/resolve/main/onnx/model.onnx";
-const DEFAULT_TOKENIZER_URL: &str = "https://huggingface.co/cross-encoder/ms-marco-TinyBERT-L-2-v2/resolve/main/tokenizer.json";
+const DEFAULT_MODEL_URL: &str =
+    "https://huggingface.co/cross-encoder/ms-marco-TinyBERT-L-2-v2/resolve/main/onnx/model.onnx";
+const DEFAULT_TOKENIZER_URL: &str =
+    "https://huggingface.co/cross-encoder/ms-marco-TinyBERT-L-2-v2/resolve/main/tokenizer.json";
 
 /// Maximum number of documents to rerank (prevents resource exhaustion)
 const MAX_RERANK_DOCUMENTS: usize = 100;
@@ -31,7 +33,10 @@ impl Reranker {
     pub fn with_config(config: &RerankerConfig) -> Result<Self> {
         let model_dir = &config.model_dir;
         let model_url = config.model_url.as_deref().unwrap_or(DEFAULT_MODEL_URL);
-        let tokenizer_url = config.tokenizer_url.as_deref().unwrap_or(DEFAULT_TOKENIZER_URL);
+        let tokenizer_url = config
+            .tokenizer_url
+            .as_deref()
+            .unwrap_or(DEFAULT_TOKENIZER_URL);
 
         let model_path = Path::new(model_dir).join("model.onnx");
         let tokenizer_path = Path::new(model_dir).join("tokenizer.json");
@@ -62,15 +67,29 @@ impl Reranker {
 
         tracing::info!("Reranker initialized (ms-marco-TinyBERT-L-2-v2)");
 
-        Ok(Self { session: Mutex::new(session), tokenizer })
+        Ok(Self {
+            session: Mutex::new(session),
+            tokenizer,
+        })
     }
 
     /// Rerank documents by relevance to query
     /// Returns indices sorted by relevance score (highest first)
-    /// 
+    ///
     /// Limits: max 100 documents, 5 second timeout
-    pub fn rerank(&self, query: &str, documents: &[String], top_k: usize) -> Result<Vec<(usize, f32)>> {
-        self.rerank_with_limits(query, documents, top_k, MAX_RERANK_DOCUMENTS, DEFAULT_RERANK_TIMEOUT)
+    pub fn rerank(
+        &self,
+        query: &str,
+        documents: &[String],
+        top_k: usize,
+    ) -> Result<Vec<(usize, f32)>> {
+        self.rerank_with_limits(
+            query,
+            documents,
+            top_k,
+            MAX_RERANK_DOCUMENTS,
+            DEFAULT_RERANK_TIMEOUT,
+        )
     }
 
     /// Rerank with explicit limits
@@ -88,7 +107,7 @@ impl Reranker {
         }
 
         let start = Instant::now();
-        
+
         // Apply document limit
         let docs_to_process = if documents.len() > max_docs {
             tracing::warn!(
@@ -103,7 +122,7 @@ impl Reranker {
 
         // OPTIMIZATION: Batch scoring instead of sequential
         let scores = self.score_batch(query, docs_to_process)?;
-        
+
         if start.elapsed() > timeout {
             tracing::warn!(
                 "Reranker: completed in {}ms (timeout: {}ms)",
@@ -136,13 +155,19 @@ impl Reranker {
         let mut max_seq_len = 0usize;
 
         for doc in documents {
-            let encoding = self.tokenizer
+            let encoding = self
+                .tokenizer
                 .encode((query, doc.as_str()), true)
                 .map_err(|e| anyhow::anyhow!("Tokenization failed: {}", e))?;
 
             let input_ids: Vec<i64> = encoding.get_ids().iter().map(|&x| x as i64).collect();
-            let attention_mask: Vec<i64> = encoding.get_attention_mask().iter().map(|&x| x as i64).collect();
-            let token_type_ids: Vec<i64> = encoding.get_type_ids().iter().map(|&x| x as i64).collect();
+            let attention_mask: Vec<i64> = encoding
+                .get_attention_mask()
+                .iter()
+                .map(|&x| x as i64)
+                .collect();
+            let token_type_ids: Vec<i64> =
+                encoding.get_type_ids().iter().map(|&x| x as i64).collect();
 
             max_seq_len = max_seq_len.max(input_ids.len());
 
@@ -174,20 +199,23 @@ impl Reranker {
 
         // Create batch tensors
         let input_ids_tensor = ort::value::Tensor::from_array((
-            [batch_size, max_seq_len], 
-            padded_input_ids.into_boxed_slice()
+            [batch_size, max_seq_len],
+            padded_input_ids.into_boxed_slice(),
         ))?;
         let attention_mask_tensor = ort::value::Tensor::from_array((
-            [batch_size, max_seq_len], 
-            padded_attention_masks.into_boxed_slice()
+            [batch_size, max_seq_len],
+            padded_attention_masks.into_boxed_slice(),
         ))?;
         let token_type_ids_tensor = ort::value::Tensor::from_array((
-            [batch_size, max_seq_len], 
-            padded_token_type_ids.into_boxed_slice()
+            [batch_size, max_seq_len],
+            padded_token_type_ids.into_boxed_slice(),
         ))?;
 
         // Run batch inference
-        let mut session = self.session.lock().map_err(|e| anyhow::anyhow!("Session lock poisoned: {}", e))?;
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Session lock poisoned: {}", e))?;
         let outputs = session.run(ort::inputs![
             "input_ids" => input_ids_tensor,
             "attention_mask" => attention_mask_tensor,
@@ -197,12 +225,10 @@ impl Reranker {
         // Extract scores from output
         let output_tensor = outputs[0].try_extract_tensor::<f32>()?;
         let data = output_tensor.1;
-        
+
         // Output shape is [batch_size, 1] or [batch_size]
         // Extract score for each document
-        let scores: Vec<f32> = (0..batch_size)
-            .map(|i| data[i])
-            .collect();
+        let scores: Vec<f32> = (0..batch_size).map(|i| data[i]).collect();
 
         Ok(scores)
     }
@@ -211,23 +237,34 @@ impl Reranker {
     #[allow(dead_code)]
     fn score_pair(&self, query: &str, document: &str) -> Result<f32> {
         // Tokenize input pair
-        let encoding = self.tokenizer
+        let encoding = self
+            .tokenizer
             .encode((query, document), true)
             .map_err(|e| anyhow::anyhow!("Tokenization failed: {}", e))?;
 
         let input_ids: Vec<i64> = encoding.get_ids().iter().map(|&x| x as i64).collect();
-        let attention_mask: Vec<i64> = encoding.get_attention_mask().iter().map(|&x| x as i64).collect();
+        let attention_mask: Vec<i64> = encoding
+            .get_attention_mask()
+            .iter()
+            .map(|&x| x as i64)
+            .collect();
         let token_type_ids: Vec<i64> = encoding.get_type_ids().iter().map(|&x| x as i64).collect();
 
         let seq_len = input_ids.len();
 
         // Create input tensors using ort::Tensor
-        let input_ids_tensor = ort::value::Tensor::from_array(([1usize, seq_len], input_ids.into_boxed_slice()))?;
-        let attention_mask_tensor = ort::value::Tensor::from_array(([1usize, seq_len], attention_mask.into_boxed_slice()))?;
-        let token_type_ids_tensor = ort::value::Tensor::from_array(([1usize, seq_len], token_type_ids.into_boxed_slice()))?;
+        let input_ids_tensor =
+            ort::value::Tensor::from_array(([1usize, seq_len], input_ids.into_boxed_slice()))?;
+        let attention_mask_tensor =
+            ort::value::Tensor::from_array(([1usize, seq_len], attention_mask.into_boxed_slice()))?;
+        let token_type_ids_tensor =
+            ort::value::Tensor::from_array(([1usize, seq_len], token_type_ids.into_boxed_slice()))?;
 
         // Run inference
-        let mut session = self.session.lock().map_err(|e| anyhow::anyhow!("Session lock poisoned: {}", e))?;
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Session lock poisoned: {}", e))?;
         let outputs = session.run(ort::inputs![
             "input_ids" => input_ids_tensor,
             "attention_mask" => attention_mask_tensor,
@@ -236,7 +273,7 @@ impl Reranker {
 
         // Extract logits - get the first element from the output
         let output_tensor = outputs[0].try_extract_tensor::<f32>()?;
-        let data = output_tensor.1;  // (shape, data)
+        let data = output_tensor.1; // (shape, data)
         let score = data[0];
 
         Ok(score)

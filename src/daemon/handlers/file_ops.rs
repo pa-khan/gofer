@@ -1,5 +1,5 @@
 //! File operations tools - Phase 1 implementation
-//! 
+//!
 //! Implements:
 //! - list_directory - recursive directory listing
 //! - read_file_chunk - read file by line range (extends existing tool_read_file)
@@ -59,18 +59,16 @@ pub async fn tool_search_files(args: Value, ctx: &ToolContext) -> Result<Value> 
     let mut total_matches = 0;
     let mut files_searched = 0;
 
-    let walker = WalkDir::new(&search_root)
-        .into_iter()
-        .filter_entry(|e| {
-            let path = e.path();
-            // Skip common excluded directories
-            let path_str = path.to_string_lossy();
-            !path_str.contains("/.git/")
-                && !path_str.contains("/node_modules/")
-                && !path_str.contains("/target/")
-                && !path_str.contains("/dist/")
-                && !path_str.contains("/.gofer/")
-        });
+    let walker = WalkDir::new(&search_root).into_iter().filter_entry(|e| {
+        let path = e.path();
+        // Skip common excluded directories
+        let path_str = path.to_string_lossy();
+        !path_str.contains("/.git/")
+            && !path_str.contains("/node_modules/")
+            && !path_str.contains("/target/")
+            && !path_str.contains("/dist/")
+            && !path_str.contains("/.gofer/")
+    });
 
     for entry in walker.filter_map(|e| e.ok()) {
         if !entry.file_type().is_file() {
@@ -154,7 +152,10 @@ pub async fn tool_search_files(args: Value, ctx: &ToolContext) -> Result<Value> 
 /// List directory structure recursively
 pub async fn tool_list_directory(args: Value, ctx: &ToolContext) -> Result<Value> {
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-    let recursive = args.get("recursive").and_then(|v| v.as_bool()).unwrap_or(false);
+    let recursive = args
+        .get("recursive")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let exclude_patterns = args
         .get("exclude_patterns")
         .and_then(|v| v.as_array())
@@ -174,7 +175,7 @@ pub async fn tool_list_directory(args: Value, ctx: &ToolContext) -> Result<Value
         });
 
     let abs_path = resolve_path_buf(&ctx.root_path, path);
-    
+
     if !abs_path.exists() {
         return Err(goferError::InvalidParams(format!("Path not found: {}", path)).into());
     }
@@ -196,7 +197,9 @@ pub async fn tool_list_directory(args: Value, ctx: &ToolContext) -> Result<Value
     for entry in walker.into_iter().filter_entry(|e| {
         // Skip excluded patterns
         let path_str = e.path().to_string_lossy();
-        !exclude_patterns.iter().any(|pattern| path_str.contains(pattern))
+        !exclude_patterns
+            .iter()
+            .any(|pattern| path_str.contains(pattern))
     }) {
         let entry = match entry {
             Ok(e) => e,
@@ -295,10 +298,7 @@ pub async fn tool_patch_file(args: Value, ctx: &ToolContext) -> Result<Value> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| goferError::InvalidParams("replace_string is required".into()))?;
 
-    let occurrence = args
-        .get("occurrence")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(1) as usize;
+    let occurrence = args.get("occurrence").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
 
     let abs_path = resolve_path_buf(&ctx.root_path, path);
 
@@ -345,7 +345,7 @@ pub async fn tool_patch_file(args: Value, ctx: &ToolContext) -> Result<Value> {
         // Replace specific occurrence (1-indexed)
         let idx = occurrence - 1;
         let (start_pos, _) = occurrences[idx];
-        
+
         let mut result = String::with_capacity(content.len());
         result.push_str(&content[..start_pos]);
         result.push_str(replace_string);

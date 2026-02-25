@@ -12,13 +12,13 @@ use tokio_util::sync::CancellationToken;
 
 use super::registry::{ProjectRecord, RegistryDb};
 use crate::cache::CacheManager;
-use crate::resource_limits::ResourceLimits;  // Feature 015
-use crate::error_recovery::CircuitBreaker;  // Feature 016
+use crate::error_recovery::CircuitBreaker; // Feature 016
+use crate::indexer::summarizer::{summary_worker, SummarizerConfig};
 use crate::indexer::{
-    load_config, start_watcher, EmbedderPool, IndexTask, IndexerService, Reranker, goferConfig,
+    goferConfig, load_config, start_watcher, EmbedderPool, IndexTask, IndexerService, Reranker,
 };
-use crate::indexer::summarizer::{SummarizerConfig, summary_worker};
 use crate::languages::LanguageService;
+use crate::resource_limits::ResourceLimits; // Feature 015
 use crate::storage::{LanceStorage, SqliteStorage};
 
 /// Global daemon state — lives for the lifetime of the daemon process.
@@ -83,20 +83,27 @@ impl DaemonMetrics {
 
     pub fn record_query(&self, latency_us: usize) {
         self.queries_served.fetch_add(1, Ordering::Relaxed);
-        self.query_latency_us.fetch_add(latency_us, Ordering::Relaxed);
+        self.query_latency_us
+            .fetch_add(latency_us, Ordering::Relaxed);
     }
 
     pub fn record_sync(&self, files: usize, chunks: usize, duration_ms: usize) {
         self.total_files_indexed.fetch_add(files, Ordering::Relaxed);
-        self.total_chunks_embedded.fetch_add(chunks, Ordering::Relaxed);
-        self.last_sync_duration_ms.store(duration_ms, Ordering::Relaxed);
+        self.total_chunks_embedded
+            .fetch_add(chunks, Ordering::Relaxed);
+        self.last_sync_duration_ms
+            .store(duration_ms, Ordering::Relaxed);
         self.syncs_completed.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn snapshot(&self) -> serde_json::Value {
         let queries = self.queries_served.load(Ordering::Relaxed);
         let latency_total = self.query_latency_us.load(Ordering::Relaxed);
-        let avg_latency_us = if queries > 0 { latency_total / queries } else { 0 };
+        let avg_latency_us = if queries > 0 {
+            latency_total / queries
+        } else {
+            0
+        };
 
         serde_json::json!({
             "total_files_indexed": self.total_files_indexed.load(Ordering::Relaxed),
@@ -112,7 +119,11 @@ impl DaemonMetrics {
     pub fn to_prometheus(&self) -> String {
         let queries = self.queries_served.load(Ordering::Relaxed);
         let latency_total = self.query_latency_us.load(Ordering::Relaxed);
-        let avg_latency = if queries > 0 { latency_total / queries } else { 0 };
+        let avg_latency = if queries > 0 {
+            latency_total / queries
+        } else {
+            0
+        };
 
         format!(
             "# HELP gofer_files_indexed_total Total files indexed.\n\
@@ -241,7 +252,7 @@ impl DaemonState {
         };
 
         tracing::info!("Loading embedding pool...");
-        let embedder = EmbedderPool::with_config(1, &config.embedding)?;  // Start with 1 instance, scale up for indexing
+        let embedder = EmbedderPool::with_config(1, &config.embedding)?; // Start with 1 instance, scale up for indexing
 
         let reranker = match Reranker::new() {
             Ok(r) => {
@@ -283,9 +294,9 @@ impl DaemonState {
             connection_semaphore: Arc::new(Semaphore::new(256)),
             metrics: Arc::new(DaemonMetrics::new()),
             notify_tx,
-            resource_limits: Arc::new(ResourceLimits::default()),  // Feature 015
-            embedding_circuit,  // Feature 016
-            vector_circuit,  // Feature 016
+            resource_limits: Arc::new(ResourceLimits::default()), // Feature 015
+            embedding_circuit,                                    // Feature 016
+            vector_circuit,                                       // Feature 016
         })
     }
 
@@ -331,22 +342,29 @@ impl DaemonState {
         let db_path = index_dir.join("graph.db");
         let lance_path = index_dir.join("lancedb");
 
-        let db_path_str = db_path
-            .to_str()
-            .ok_or_else(|| anyhow::anyhow!("Invalid SQLite path: non-UTF8 characters in {:?}", db_path))?;
+        let db_path_str = db_path.to_str().ok_or_else(|| {
+            anyhow::anyhow!("Invalid SQLite path: non-UTF8 characters in {:?}", db_path)
+        })?;
         let sqlite = SqliteStorage::new(db_path_str).await?;
         sqlite.migrate().await?;
 
         // Run integrity check on SQLite database
         if let Err(e) = sqlite.check_integrity().await {
-            tracing::error!("SQLite integrity check failed for project {}: {}", record.id, e);
+            tracing::error!(
+                "SQLite integrity check failed for project {}: {}",
+                record.id,
+                e
+            );
             // Continue anyway - the database may still be usable
         }
 
         // C4: Recover summary queue items stuck in 'processing' from a previous crash
         let recovered = sqlite.recover_summary_queue().await?;
         if recovered > 0 {
-            tracing::info!("Recovered {} stuck summary queue items → pending", recovered);
+            tracing::info!(
+                "Recovered {} stuck summary queue items → pending",
+                recovered
+            );
         }
 
         // C3: Invalidate chunk embedding cache if the model changed since last index
@@ -361,21 +379,32 @@ impl DaemonState {
                     current_version
                 );
                 sqlite.clear_chunk_cache().await?;
-                sqlite.set_index_meta(cache_version_key, &current_version).await?;
+                sqlite
+                    .set_index_meta(cache_version_key, &current_version)
+                    .await?;
             }
             None => {
-                sqlite.set_index_meta(cache_version_key, &current_version).await?;
+                sqlite
+                    .set_index_meta(cache_version_key, &current_version)
+                    .await?;
             }
         }
 
-        let lance_path_str = lance_path
-            .to_str()
-            .ok_or_else(|| anyhow::anyhow!("Invalid LanceDB path: non-UTF8 characters in {:?}", lance_path))?;
+        let lance_path_str = lance_path.to_str().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Invalid LanceDB path: non-UTF8 characters in {:?}",
+                lance_path
+            )
+        })?;
         let lance_storage = LanceStorage::new(lance_path_str, self.embedder.dimension()).await?;
 
         // Run health check on LanceDB
         if let Err(e) = lance_storage.health_check().await {
-            tracing::error!("LanceDB health check failed for project {}: {}", record.id, e);
+            tracing::error!(
+                "LanceDB health check failed for project {}: {}",
+                record.id,
+                e
+            );
             // Continue anyway - the database may still be usable
         }
 
@@ -407,8 +436,8 @@ impl DaemonState {
         // Spawn indexer worker — shares lance + embedder pool via Arc
         // Feature 012: Pass cache for invalidation on file changes
         // Use configured parallel workers
-        let indexer = IndexerService::new(sqlite, lance, self.embedder.clone(), workers)
-            .with_cache(cache);
+        let indexer =
+            IndexerService::new(sqlite, lance, self.embedder.clone(), workers).with_cache(cache);
 
         tokio::spawn(async move {
             indexer.run(task_rx).await;
@@ -433,11 +462,7 @@ impl DaemonState {
     }
 
     /// Activate a project: load + full_sync + start watcher.
-    pub async fn activate_project(
-        &self,
-        project_path: &str,
-        watch: bool,
-    ) -> Result<String> {
+    pub async fn activate_project(&self, project_path: &str, watch: bool) -> Result<String> {
         let record = self
             .registry
             .get_by_path(project_path)
@@ -471,7 +496,14 @@ impl DaemonState {
         );
 
         let root = PathBuf::from(project_path);
-        sync_indexer.full_sync(&root, &ignore_patterns, Some(self.sync_progress.clone()), Some(self.metrics.clone())).await?;
+        sync_indexer
+            .full_sync(
+                &root,
+                &ignore_patterns,
+                Some(self.sync_progress.clone()),
+                Some(self.metrics.clone()),
+            )
+            .await?;
 
         // Spawn summarizer background worker (if LLM enabled)
         let summarizer_config = SummarizerConfig::from_toml(&config.summarizer);

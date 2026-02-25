@@ -1,16 +1,23 @@
+use super::common::{make_relative, resolve_path, ToolContext};
+use crate::error::goferError;
 use anyhow::Result;
 use serde_json::{json, Value};
-use crate::error::goferError;
-use super::common::{ToolContext, resolve_path, make_relative};
 
 pub async fn tool_get_errors(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file = args.get("file").and_then(|v| v.as_str());
     let severity = args.get("severity").and_then(|v| v.as_str());
     let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(200).min(500) as u32;
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(200)
+        .min(500) as u32;
 
     let resolved_file = file.map(|f| resolve_path(&ctx.root_path, f));
-    let errors = &ctx.sqlite.get_errors(resolved_file.as_deref(), severity, offset, limit).await?;
+    let errors = &ctx
+        .sqlite
+        .get_errors(resolved_file.as_deref(), severity, offset, limit)
+        .await?;
     let count = errors.len() as u32;
 
     Ok(json!({
@@ -163,18 +170,24 @@ pub async fn tool_has_tests_for(args: Value, ctx: &ToolContext) -> Result<Value>
         format!("{}.test.js", file_path.trim_end_matches(".js")),
         format!("{}.spec.ts", file_path.trim_end_matches(".ts")),
         format!("{}.spec.js", file_path.trim_end_matches(".js")),
-
         // Rust patterns
         format!("{}_test.rs", file_path.trim_end_matches(".rs")),
-
         // Python patterns
         format!("test_{}", file_path),
         format!("{}_test.py", file_path.trim_end_matches(".py")),
-
         // General tests directory patterns
-        format!("tests/test_{}", file_path.split('/').next_back().unwrap_or(file_path)),
-        format!("tests/{}_test", file_path.split('/').next_back().unwrap_or(file_path)),
-        format!("__tests__/{}", file_path.split('/').next_back().unwrap_or(file_path)),
+        format!(
+            "tests/test_{}",
+            file_path.split('/').next_back().unwrap_or(file_path)
+        ),
+        format!(
+            "tests/{}_test",
+            file_path.split('/').next_back().unwrap_or(file_path)
+        ),
+        format!(
+            "__tests__/{}",
+            file_path.split('/').next_back().unwrap_or(file_path)
+        ),
     ];
 
     let mut found_tests = Vec::new();

@@ -1,11 +1,13 @@
-use std::sync::Arc;
+use super::common::ToolContext;
+use super::files::{
+    tool_read_file, tool_read_function_context, tool_read_types_only, tool_skeleton,
+};
+use super::search::tool_search;
+use super::symbols::{tool_get_references, tool_get_symbols};
+use crate::error::goferError;
 use anyhow::Result;
 use serde_json::{json, Value};
-use crate::error::goferError;
-use super::common::ToolContext;
-use super::files::{tool_read_file, tool_skeleton, tool_read_function_context, tool_read_types_only};
-use super::symbols::{tool_get_symbols, tool_get_references};
-use super::search::tool_search;
+use std::sync::Arc;
 
 pub async fn tool_batch_operations(args: Value, ctx: &ToolContext) -> Result<Value> {
     use std::time::Instant;
@@ -15,22 +17,28 @@ pub async fn tool_batch_operations(args: Value, ctx: &ToolContext) -> Result<Val
     const MAX_BATCH_SIZE: usize = 100;
     const MAX_CONCURRENT: usize = 10;
 
-    let operations = args.get("operations")
+    let operations = args
+        .get("operations")
         .and_then(|v| v.as_array())
         .ok_or_else(|| goferError::InvalidParams("operations array is required".into()))?;
 
     // Validate batch size
     if operations.len() > MAX_BATCH_SIZE {
-        return Err(goferError::InvalidParams(
-            format!("Too many operations. Max: {}, got: {}", MAX_BATCH_SIZE, operations.len())
-        ).into());
+        return Err(goferError::InvalidParams(format!(
+            "Too many operations. Max: {}, got: {}",
+            MAX_BATCH_SIZE,
+            operations.len()
+        ))
+        .into());
     }
 
-    let parallel = args.get("parallel")
+    let parallel = args
+        .get("parallel")
         .and_then(|v| v.as_bool())
         .unwrap_or(true); // NOW default to true!
 
-    let continue_on_error = args.get("continue_on_error")
+    let continue_on_error = args
+        .get("continue_on_error")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
@@ -41,7 +49,8 @@ pub async fn tool_batch_operations(args: Value, ctx: &ToolContext) -> Result<Val
         // Parallel execution with rate limiting
         let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT));
 
-        let tasks: Vec<_> = operations.iter()
+        let tasks: Vec<_> = operations
+            .iter()
             .enumerate()
             .map(|(idx, operation)| {
                 let ctx = ctx.clone(); // NOW we can clone!
@@ -80,7 +89,10 @@ pub async fn tool_batch_operations(args: Value, ctx: &ToolContext) -> Result<Val
 
     let total_duration_ms = start.elapsed().as_millis() as u64;
 
-    let successful = results.iter().filter(|r| r["success"].as_bool().unwrap_or(false)).count();
+    let successful = results
+        .iter()
+        .filter(|r| r["success"].as_bool().unwrap_or(false))
+        .count();
     let failed = results.len() - successful;
 
     Ok(json!({
@@ -97,62 +109,51 @@ pub async fn tool_batch_operations(args: Value, ctx: &ToolContext) -> Result<Val
 async fn execute_single_operation(
     idx: usize,
     operation: Value,
-    ctx: &ToolContext
+    ctx: &ToolContext,
 ) -> Result<Value> {
-    let op_type = operation.get("type")
+    let op_type = operation
+        .get("type")
         .and_then(|v| v.as_str())
         .unwrap_or("unknown");
 
-    let params = operation.get("params")
-        .cloned()
-        .unwrap_or(json!({}));
+    let params = operation.get("params").cloned().unwrap_or(json!({}));
 
     let op_start = std::time::Instant::now();
 
     let (success, data, error) = match op_type {
-        "read_file" => {
-            match tool_read_file(params, ctx).await {
-                Ok(result) => (true, Some(result), None),
-                Err(e) => (false, None, Some(e.to_string())),
-            }
-        }
-        "get_symbols" => {
-            match tool_get_symbols(params, ctx).await {
-                Ok(result) => (true, Some(result), None),
-                Err(e) => (false, None, Some(e.to_string())),
-            }
-        }
-        "search" => {
-            match tool_search(params, ctx).await {
-                Ok(result) => (true, Some(result), None),
-                Err(e) => (false, None, Some(e.to_string())),
-            }
-        }
-        "skeleton" => {
-            match tool_skeleton(params, ctx).await {
-                Ok(result) => (true, Some(result), None),
-                Err(e) => (false, None, Some(e.to_string())),
-            }
-        }
-        "get_references" => {
-            match tool_get_references(params, ctx).await {
-                Ok(result) => (true, Some(result), None),
-                Err(e) => (false, None, Some(e.to_string())),
-            }
-        }
-        "read_function_context" => {
-            match tool_read_function_context(params, ctx).await {
-                Ok(result) => (true, Some(result), None),
-                Err(e) => (false, None, Some(e.to_string())),
-            }
-        }
-        "read_types_only" => {
-            match tool_read_types_only(params, ctx).await {
-                Ok(result) => (true, Some(result), None),
-                Err(e) => (false, None, Some(e.to_string())),
-            }
-        }
-        _ => (false, None, Some(format!("Unknown operation type: {}", op_type))),
+        "read_file" => match tool_read_file(params, ctx).await {
+            Ok(result) => (true, Some(result), None),
+            Err(e) => (false, None, Some(e.to_string())),
+        },
+        "get_symbols" => match tool_get_symbols(params, ctx).await {
+            Ok(result) => (true, Some(result), None),
+            Err(e) => (false, None, Some(e.to_string())),
+        },
+        "search" => match tool_search(params, ctx).await {
+            Ok(result) => (true, Some(result), None),
+            Err(e) => (false, None, Some(e.to_string())),
+        },
+        "skeleton" => match tool_skeleton(params, ctx).await {
+            Ok(result) => (true, Some(result), None),
+            Err(e) => (false, None, Some(e.to_string())),
+        },
+        "get_references" => match tool_get_references(params, ctx).await {
+            Ok(result) => (true, Some(result), None),
+            Err(e) => (false, None, Some(e.to_string())),
+        },
+        "read_function_context" => match tool_read_function_context(params, ctx).await {
+            Ok(result) => (true, Some(result), None),
+            Err(e) => (false, None, Some(e.to_string())),
+        },
+        "read_types_only" => match tool_read_types_only(params, ctx).await {
+            Ok(result) => (true, Some(result), None),
+            Err(e) => (false, None, Some(e.to_string())),
+        },
+        _ => (
+            false,
+            None,
+            Some(format!("Unknown operation type: {}", op_type)),
+        ),
     };
 
     let duration_ms = op_start.elapsed().as_millis() as u64;
@@ -171,7 +172,7 @@ async fn execute_single_operation(
 async fn execute_sequential(
     operations: &[Value],
     ctx: &ToolContext,
-    continue_on_error: bool
+    continue_on_error: bool,
 ) -> Result<Vec<Value>> {
     let mut results = Vec::new();
 

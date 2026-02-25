@@ -74,16 +74,24 @@ impl GitRepo {
                     cache.remove(&k);
                 }
             }
-            cache.insert(key, CacheEntry {
-                value: results.clone(),
-                created: std::time::Instant::now(),
-            });
+            cache.insert(
+                key,
+                CacheEntry {
+                    value: results.clone(),
+                    created: std::time::Instant::now(),
+                },
+            );
         }
 
         results
     }
 
-    fn blame_lines_uncached(&self, file_path: &Path, start_line: u32, end_line: u32) -> Vec<BlameInfo> {
+    fn blame_lines_uncached(
+        &self,
+        file_path: &Path,
+        start_line: u32,
+        end_line: u32,
+    ) -> Vec<BlameInfo> {
         let mut results = Vec::new();
 
         // Make path relative to repo root
@@ -109,20 +117,23 @@ impl GitRepo {
         for hunk in blame.iter() {
             let commit_id = hunk.final_commit_id().to_string();
             let sig = hunk.final_signature();
-            
+
             let author = sig.name().unwrap_or("Unknown").to_string();
             let timestamp = sig.when().seconds();
-            
+
             // Get commit message
             let message = self
                 .repo
                 .find_commit(hunk.final_commit_id())
                 .ok()
-                .and_then(|c| c.message().map(|m| m.lines().next().unwrap_or("").to_string()))
+                .and_then(|c| {
+                    c.message()
+                        .map(|m| m.lines().next().unwrap_or("").to_string())
+                })
                 .unwrap_or_default();
 
             let line = hunk.final_start_line() as u32;
-            
+
             results.push(BlameInfo {
                 line,
                 commit_id,
@@ -161,10 +172,13 @@ impl GitRepo {
                     cache.remove(&k);
                 }
             }
-            cache.insert(key, CacheEntry {
-                value: results.clone(),
-                created: std::time::Instant::now(),
-            });
+            cache.insert(
+                key,
+                CacheEntry {
+                    value: results.clone(),
+                    created: std::time::Instant::now(),
+                },
+            );
         }
 
         results
@@ -211,7 +225,10 @@ impl GitRepo {
                     Err(_) => continue,
                 };
 
-                let diff = match self.repo.diff_tree_to_tree(Some(&parent_tree), Some(&tree), None) {
+                let diff = match self
+                    .repo
+                    .diff_tree_to_tree(Some(&parent_tree), Some(&tree), None)
+                {
                     Ok(d) => d,
                     Err(_) => continue,
                 };

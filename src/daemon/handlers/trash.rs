@@ -159,7 +159,8 @@ pub async fn tool_list_trash(_args: Value, ctx: &ToolContext) -> Result<Value> {
         if let Ok(metadata) = TrashMetadata::load(&trash_root, &uuid).await {
             total_size += metadata.size_bytes;
 
-            let deleted_ago = format_duration(Utc::now().signed_duration_since(metadata.deleted_at));
+            let deleted_ago =
+                format_duration(Utc::now().signed_duration_since(metadata.deleted_at));
 
             items.push(json!({
                 "deletion_uuid": metadata.deletion_uuid,

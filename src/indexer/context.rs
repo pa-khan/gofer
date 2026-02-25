@@ -83,7 +83,10 @@ fn resolve_import(
 
     // 2. Index файл: base_dir/normalized/index.ext
     for ext in extensions {
-        let candidate = base_dir.join(normalized).join("index").with_added_extension(ext);
+        let candidate = base_dir
+            .join(normalized)
+            .join("index")
+            .with_added_extension(ext);
         if candidate.exists() {
             return Some(candidate);
         }
@@ -165,7 +168,8 @@ fn resolve_tsconfig_paths(
     extensions: &[&str],
 ) -> Option<PathBuf> {
     // Найти tsconfig.json поднимаясь по директориям
-    let tsconfig_path = base_dir.ancestors()
+    let tsconfig_path = base_dir
+        .ancestors()
         .map(|p| p.join("tsconfig.json"))
         .find(|p| p.exists())?;
 
@@ -203,7 +207,10 @@ fn resolve_tsconfig_paths(
                 }
                 // Index файл
                 for ext in extensions {
-                    let candidate = resolved_base.join(remainder).join("index").with_added_extension(ext);
+                    let candidate = resolved_base
+                        .join(remainder)
+                        .join("index")
+                        .with_added_extension(ext);
                     if candidate.exists() {
                         return Some(candidate);
                     }

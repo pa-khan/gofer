@@ -3,9 +3,11 @@ use std::sync::Arc;
 
 use tokio::sync::{mpsc, Mutex, Semaphore};
 
-use super::domains::{parse_backend_routes, parse_frontend_api_calls, paths_match, run_structural_fingerprinting};
+use super::domains::{
+    parse_backend_routes, parse_frontend_api_calls, paths_match, run_structural_fingerprinting,
+};
 use super::embedder::EmbedderPool;
-use super::parser::{CodeParser, SupportedLanguage, smart_chunk_file};
+use super::parser::{smart_chunk_file, CodeParser, SupportedLanguage};
 use super::pipeline::{self, ParsedFileMetadata};
 use super::watcher::IndexTask;
 use crate::cache::CacheManager;
@@ -38,7 +40,7 @@ impl IndexerService {
             parallel_workers,
         }
     }
-    
+
     /// Set cache manager for invalidation on file changes (Feature 012)
     pub fn with_cache(mut self, cache: Arc<CacheManager>) -> Self {
         self.cache = Some(cache);
@@ -48,7 +50,10 @@ impl IndexerService {
     /// Run the indexer worker that processes tasks from the channel
     /// Uses bounded parallelism to process multiple files concurrently without overloading resources.
     pub async fn run(self, mut rx: mpsc::Receiver<IndexTask>) {
-        tracing::info!("Indexer service started with {} workers", self.parallel_workers);
+        tracing::info!(
+            "Indexer service started with {} workers",
+            self.parallel_workers
+        );
 
         // Limit concurrent indexing tasks to avoid OOM or embedding bottlenecks
         let semaphore = Arc::new(Semaphore::new(self.parallel_workers));
@@ -61,7 +66,7 @@ impl IndexerService {
             };
 
             let service = self.clone();
-            
+
             tokio::spawn(async move {
                 match task {
                     IndexTask::Reindex(path) => {
@@ -103,18 +108,24 @@ impl IndexerService {
 
         let mut parser = CodeParser::new();
         let symbols = parser.parse_symbols(&content, language)?;
-        let chunks = smart_chunk_file(&content, &path_str, language)
-            .unwrap_or_else(|e| {
-                tracing::debug!("smart_chunk_file failed for {}: {}, falling back to parse_chunks", path_str, e);
-                parser.parse_chunks(&content, &path_str, language).unwrap_or_else(|e2| {
+        let chunks = smart_chunk_file(&content, &path_str, language).unwrap_or_else(|e| {
+            tracing::debug!(
+                "smart_chunk_file failed for {}: {}, falling back to parse_chunks",
+                path_str,
+                e
+            );
+            parser
+                .parse_chunks(&content, &path_str, language)
+                .unwrap_or_else(|e2| {
                     tracing::warn!("parse_chunks also failed for {}: {}", path_str, e2);
                     Vec::new()
                 })
-            });
+        });
         let all_refs = parser.parse_references(&content, language)?;
         let imports = parser.parse_imports(&content, language);
 
-        let modified = tokio::fs::metadata(path).await?
+        let modified = tokio::fs::metadata(path)
+            .await?
             .modified()?
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs() as i64;
@@ -135,12 +146,16 @@ impl IndexerService {
             })
             .collect();
 
-        self.sqlite.insert_symbols(file_id, &symbols_with_file_id).await?;
+        self.sqlite
+            .insert_symbols(file_id, &symbols_with_file_id)
+            .await?;
         self.sqlite.clear_dependency_usage(file_id).await?;
 
         let ecosystem = match language {
             SupportedLanguage::Rust => "cargo",
-            SupportedLanguage::TypeScript | SupportedLanguage::JavaScript | SupportedLanguage::Vue => "npm",
+            SupportedLanguage::TypeScript
+            | SupportedLanguage::JavaScript
+            | SupportedLanguage::Vue => "npm",
             SupportedLanguage::Python => "pip",
             SupportedLanguage::Go => "go",
         };
@@ -158,11 +173,19 @@ impl IndexerService {
                     _ => "import",
                 };
 
-                if let Err(e) = self.sqlite.record_dependency_usage(
-                    file_id, &pkg_name, ecosystem,
-                    import.line as i32, usage_type,
-                    &import.path, items_json.as_deref(),
-                ).await {
+                if let Err(e) = self
+                    .sqlite
+                    .record_dependency_usage(
+                        file_id,
+                        &pkg_name,
+                        ecosystem,
+                        import.line as i32,
+                        usage_type,
+                        &import.path,
+                        items_json.as_deref(),
+                    )
+                    .await
+                {
                     tracing::warn!("Failed to record dependency usage: {}", e);
                 }
             }
@@ -175,14 +198,16 @@ impl IndexerService {
                 .iter()
                 .filter(|r| {
                     r.line >= symbol.line_start
-                    && r.line <= symbol.line_end
-                    && r.target_name != symbol.name
+                        && r.line <= symbol.line_end
+                        && r.target_name != symbol.name
                 })
                 .cloned()
                 .collect();
 
             if !symbol_refs.is_empty() {
-                self.sqlite.insert_references(symbol.id, &symbol_refs).await?;
+                self.sqlite
+                    .insert_references(symbol.id, &symbol_refs)
+                    .await?;
             }
         }
 
@@ -198,8 +223,13 @@ impl IndexerService {
             lance.upsert_chunks(&chunks, &embeddings).await?;
         }
 
-        tracing::info!("⚡ Incrementally indexed {:?}: {} symbols, {} chunks, {} refs",
-            path, symbols_with_file_id.len(), chunks.len(), all_refs.len());
+        tracing::info!(
+            "⚡ Incrementally indexed {:?}: {} symbols, {} chunks, {} refs",
+            path,
+            symbols_with_file_id.len(),
+            chunks.len(),
+            all_refs.len()
+        );
 
         // Feature 012: Invalidate cache for changed file
         if let Some(ref cache) = self.cache {
@@ -219,14 +249,14 @@ impl IndexerService {
             let lance = self.lance.lock().await;
             lance.delete_file(&path_str).await?;
         }
-        
+
         // Feature 012: Invalidate cache for deleted file
         if let Some(ref cache) = self.cache {
             cache.invalidate_file(&path_str).await;
             cache.invalidate_all_searches().await;
             tracing::debug!("Invalidated cache for deleted file {:?}", path);
         }
-        
+
         tracing::info!("Deleted: {:?}", path);
         Ok(())
     }
@@ -255,7 +285,8 @@ impl IndexerService {
             self.lance.clone(),
             self.embedder.clone(),
             progress.clone(),
-        ).await?;
+        )
+        .await?;
 
         let changed_count = metadata.len();
         if changed_count == 0 {
@@ -270,13 +301,13 @@ impl IndexerService {
         tracing::info!("Phase 4: Cross-stack linking...");
         let mut links_created = 0;
 
-        let backend_files: Vec<&ParsedFileMetadata> = metadata.iter()
+        let backend_files: Vec<&ParsedFileMetadata> = metadata
+            .iter()
             .filter(|f| f.domain == "rust" && f.path.contains("api"))
             .collect();
 
-        let frontend_files: Vec<&ParsedFileMetadata> = metadata.iter()
-            .filter(|f| f.domain == "frontend")
-            .collect();
+        let frontend_files: Vec<&ParsedFileMetadata> =
+            metadata.iter().filter(|f| f.domain == "frontend").collect();
 
         for backend_file in &backend_files {
             let ext = std::path::Path::new(&backend_file.path)
@@ -290,19 +321,26 @@ impl IndexerService {
                     for call in &api_calls {
                         if paths_match(&route.path, &call.path_pattern) {
                             if let Some(handler) = &route.handler {
-                                if let Ok(Some(backend_symbol)) = self.sqlite
-                                    .find_symbol_by_name_and_file(handler, &backend_file.path).await
+                                if let Ok(Some(backend_symbol)) = self
+                                    .sqlite
+                                    .find_symbol_by_name_and_file(handler, &backend_file.path)
+                                    .await
                                 {
-                                    if let Ok(Some(frontend_symbol)) = self.sqlite
-                                        .find_symbol_at_line(&frontend_file.path, call.line as i32).await
+                                    if let Ok(Some(frontend_symbol)) = self
+                                        .sqlite
+                                        .find_symbol_at_line(&frontend_file.path, call.line as i32)
+                                        .await
                                     {
-                                        let _ = self.sqlite.insert_entity_link(
-                                            backend_symbol.id,
-                                            frontend_symbol.id,
-                                            0.8,
-                                            "api_route",
-                                            std::slice::from_ref(&route.path),
-                                        ).await;
+                                        let _ = self
+                                            .sqlite
+                                            .insert_entity_link(
+                                                backend_symbol.id,
+                                                frontend_symbol.id,
+                                                0.8,
+                                                "api_route",
+                                                std::slice::from_ref(&route.path),
+                                            )
+                                            .await;
                                         links_created += 1;
                                     }
                                 }
@@ -321,7 +359,8 @@ impl IndexerService {
         }
         tracing::info!("Phase 5: Structural fingerprinting...");
 
-        let fp_files: Vec<(String, String, SupportedLanguage)> = metadata.iter()
+        let fp_files: Vec<(String, String, SupportedLanguage)> = metadata
+            .iter()
             .map(|f| (f.path.clone(), (*f.content).clone(), f.language))
             .collect();
 
@@ -329,12 +368,18 @@ impl IndexerService {
             .await
             .unwrap_or(0);
 
-        tracing::info!("Structural fingerprinting: {} links created", fingerprint_links);
+        tracing::info!(
+            "Structural fingerprinting: {} links created",
+            fingerprint_links
+        );
 
         // Phase 6: Build vector index for ANN search (incremental)
         {
             let lance = self.lance.lock().await;
-            if let Err(e) = lance.create_vector_index_incremental(Some(&self.sqlite)).await {
+            if let Err(e) = lance
+                .create_vector_index_incremental(Some(&self.sqlite))
+                .await
+            {
                 tracing::warn!("Failed to create vector index: {}", e);
             }
         }
@@ -345,7 +390,10 @@ impl IndexerService {
         }
         tracing::info!("Phase 7: Sub-project detection...");
         let subproject_count = detect_and_store_subprojects(root, &self.sqlite).await;
-        tracing::info!("Sub-project detection: {} sub-projects found", subproject_count);
+        tracing::info!(
+            "Sub-project detection: {} sub-projects found",
+            subproject_count
+        );
 
         tracing::info!("Full sync completed: {} files indexed", changed_count);
 
@@ -354,7 +402,11 @@ impl IndexerService {
                 .as_ref()
                 .map(|p| p.chunks_embedded.load(std::sync::atomic::Ordering::Relaxed))
                 .unwrap_or(0);
-            m.record_sync(changed_count, chunks_embedded, sync_start.elapsed().as_millis() as usize);
+            m.record_sync(
+                changed_count,
+                chunks_embedded,
+                sync_start.elapsed().as_millis() as usize,
+            );
         }
 
         if let Some(ref p) = progress {
@@ -417,7 +469,8 @@ async fn detect_and_store_subprojects(root: &Path, sqlite: &SqliteStorage) -> us
         .git_ignore(true)
         .build();
 
-    let workspace_rel: std::collections::HashSet<String> = subprojects.iter().map(|(_, p, _, _)| p.clone()).collect();
+    let workspace_rel: std::collections::HashSet<String> =
+        subprojects.iter().map(|(_, p, _, _)| p.clone()).collect();
 
     for entry in walker.flatten() {
         let path = entry.path();
@@ -530,12 +583,19 @@ fn resolve_npm_workspaces(root: &Path) -> Vec<std::path::PathBuf> {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
                 // "workspaces": ["packages/*", "apps/*"]
                 // or "workspaces": { "packages": ["packages/*"] }
-                let patterns = if let Some(arr) = json.get("workspaces").and_then(|w| w.as_array()) {
-                    arr.iter().filter_map(|v| v.as_str().map(String::from)).collect::<Vec<_>>()
+                let patterns = if let Some(arr) = json.get("workspaces").and_then(|w| w.as_array())
+                {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect::<Vec<_>>()
                 } else if let Some(obj) = json.get("workspaces").and_then(|w| w.as_object()) {
                     obj.get("packages")
                         .and_then(|p| p.as_array())
-                        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
                         .unwrap_or_default()
                 } else {
                     Vec::new()

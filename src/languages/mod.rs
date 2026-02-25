@@ -5,8 +5,8 @@ pub mod rust_analyzer;
 pub mod typescript;
 pub mod vue;
 
-use std::path::Path;
 use serde_json::Value;
+use std::path::Path;
 
 /// Shared tool definition for MCP registration
 #[derive(Debug, Clone, serde::Serialize)]

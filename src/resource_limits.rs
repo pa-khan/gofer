@@ -8,7 +8,7 @@ use std::sync::Arc;
 pub struct ResourceLimits {
     /// Maximum concurrent requests (default: 100)
     pub max_concurrent_requests: usize,
-    
+
     /// Current active requests counter
     active_requests: Arc<AtomicUsize>,
 }
@@ -27,7 +27,7 @@ impl ResourceLimits {
     /// Returns Ok(RequestGuard) if successful, Err if limit exceeded
     pub fn try_acquire_request(&self) -> Result<RequestGuard, ResourceLimitError> {
         let current = self.active_requests.fetch_add(1, Ordering::SeqCst);
-        
+
         if current >= self.max_concurrent_requests {
             self.active_requests.fetch_sub(1, Ordering::SeqCst);
             return Err(ResourceLimitError::TooManyRequests {
@@ -35,7 +35,7 @@ impl ResourceLimits {
                 max: self.max_concurrent_requests,
             });
         }
-        
+
         Ok(RequestGuard {
             counter: self.active_requests.clone(),
         })

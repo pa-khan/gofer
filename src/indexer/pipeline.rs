@@ -106,7 +106,10 @@ pub async fn run_pipeline(
         .map(|n| ((n.get() / 2).max(4)).min(8))
         .unwrap_or(4);
 
-    tracing::info!("Pipeline: {} parser workers (optimized for CPU usage)", num_workers);
+    tracing::info!(
+        "Pipeline: {} parser workers (optimized for CPU usage)",
+        num_workers
+    );
 
     // Scale up embedder pool for indexing (4 instances for parallelism)
     if let Err(e) = embedder.scale_up(4).await {
@@ -134,7 +137,14 @@ pub async fn run_pipeline(
     let ignores_owned = extra_ignores.to_vec();
     let prog_scanner = progress.clone();
     let h_scanner = tokio::spawn(async move {
-        scanner_stage(root_owned, ignores_owned, existing_hashes, scan_tx, prog_scanner).await
+        scanner_stage(
+            root_owned,
+            ignores_owned,
+            existing_hashes,
+            scan_tx,
+            prog_scanner,
+        )
+        .await
     });
 
     // Parser workers — each gets a clone of the shared receiver
@@ -143,21 +153,27 @@ pub async fn run_pipeline(
         let rx = scan_rx.clone();
         let tx = parse_tx.clone();
         let prog = progress.clone();
-        h_parsers.push(tokio::spawn(async move {
-            parser_worker(rx, tx, prog).await
-        }));
+        h_parsers.push(tokio::spawn(
+            async move { parser_worker(rx, tx, prog).await },
+        ));
     }
     drop(parse_tx); // Only worker clones hold senders now
 
-    let h_batcher = tokio::spawn(async move {
-        batcher_stage(parse_rx, batch_tx).await
-    });
+    let h_batcher = tokio::spawn(async move { batcher_stage(parse_rx, batch_tx).await });
 
     let prog_embedder = progress.clone();
     let sqlite_embedder = sqlite.clone();
     let embedder_clone = embedder.clone();
     let h_embedder: JoinHandle<Result<()>> = tokio::spawn(async move {
-        if let Err(ref e) = embedder_stage(embedder_clone, batch_rx, embed_tx, prog_embedder, sqlite_embedder).await {
+        if let Err(ref e) = embedder_stage(
+            embedder_clone,
+            batch_rx,
+            embed_tx,
+            prog_embedder,
+            sqlite_embedder,
+        )
+        .await
+        {
             tracing::error!("Embedder stage error: {}", e);
         }
         Ok(())
@@ -168,7 +184,9 @@ pub async fn run_pipeline(
     let prog_writer = progress.clone();
     let lance_compact = lance.clone();
     let h_writer: JoinHandle<Result<()>> = tokio::spawn(async move {
-        if let Err(ref e) = writer_stage(sqlite_clone, lance, embed_rx, collected_clone, prog_writer).await {
+        if let Err(ref e) =
+            writer_stage(sqlite_clone, lance, embed_rx, collected_clone, prog_writer).await
+        {
             tracing::error!("Writer stage error: {}", e);
         }
         Ok(())
@@ -213,7 +231,7 @@ pub async fn run_pipeline(
     // Keep max 100k entries (~150MB) and entries younger than 30 days
     const CACHE_MAX_ENTRIES: i64 = 100_000;
     const CACHE_MAX_AGE_DAYS: i64 = 30;
-    
+
     if let Err(e) = sqlite.evict_chunk_cache_by_age(CACHE_MAX_AGE_DAYS).await {
         tracing::debug!("Cache age eviction failed (non-fatal): {}", e);
     }
@@ -273,7 +291,7 @@ async fn scanner_stage(
                 continue;
             }
         };
-        
+
         // Skip files that are too large
         if metadata.len() > MAX_FILE_SIZE_BYTES {
             tracing::debug!(
@@ -285,8 +303,9 @@ async fn scanner_stage(
             skipped_too_large += 1;
             continue;
         }
-        
-        let modified = metadata.modified()
+
+        let modified = metadata
+            .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs() as i64)
@@ -356,7 +375,11 @@ async fn scanner_stage(
 
     tracing::info!(
         "Scanner: {} files sent to pipeline, {} unchanged, {} unsupported, {} too large, {} errors",
-        sent, skipped_unchanged, skipped_unsupported, skipped_too_large, skipped_errors
+        sent,
+        skipped_unchanged,
+        skipped_unsupported,
+        skipped_too_large,
+        skipped_errors
     );
 
     Ok(sent)
@@ -388,7 +411,8 @@ async fn parser_worker(
             let content_ref = &*scanned.content;
 
             // Single-pass parse: symbols + chunks + refs + imports from one tree
-            let parsed_file = match parser.parse_file(content_ref, &scanned.path, scanned.language) {
+            let parsed_file = match parser.parse_file(content_ref, &scanned.path, scanned.language)
+            {
                 Ok(pf) => pf,
                 Err(e) => {
                     tracing::warn!("Parser: failed to parse {}: {}", scanned.path, e);
@@ -397,8 +421,7 @@ async fn parser_worker(
             };
 
             let domain_config = DomainConfig::default_config();
-            let (domain, tech_stack) =
-                detect_domain(&scanned.path, content_ref, &domain_config);
+            let (domain, tech_stack) = detect_domain(&scanned.path, content_ref, &domain_config);
 
             Ok(ParsedDoc {
                 path: scanned.path,
@@ -448,15 +471,19 @@ fn adaptive_batch_size(chunks: &[CodeChunk]) -> usize {
     if chunks.is_empty() {
         return BATCH_CHUNK_SIZE_BASE;
     }
-    
+
     let total_len: usize = chunks.iter().map(|c| c.content.len()).sum();
     let avg_len = total_len / chunks.len();
-    
+
     // Heuristic: target ~100KB per batch for embedding
     // avg_len * batch_size ≈ 100KB → batch_size ≈ 100KB / avg_len
     let target_bytes = 100 * 1024;
-    let computed = if avg_len > 0 { target_bytes / avg_len } else { BATCH_CHUNK_SIZE_BASE };
-    
+    let computed = if avg_len > 0 {
+        target_bytes / avg_len
+    } else {
+        BATCH_CHUNK_SIZE_BASE
+    };
+
     computed.clamp(BATCH_CHUNK_SIZE_MIN, BATCH_CHUNK_SIZE_MAX)
 }
 
@@ -487,7 +514,7 @@ async fn batcher_stage(
                     Some(doc) => {
                         docs_received += 1;
                         let doc_chunks = doc.chunks.len();
-                        
+
                         // Split ParsedDoc into chunks + metadata
                         let had_chunks = !current_chunks.is_empty();
                         current_chunks.extend(doc.chunks);
@@ -504,7 +531,7 @@ async fn batcher_stage(
                             content: doc.content,
                         });
 
-                        tracing::debug!("Batcher: received doc {} '{}' with {} chunks (total accumulated: {} chunks, {} metadata)", 
+                        tracing::debug!("Batcher: received doc {} '{}' with {} chunks (total accumulated: {} chunks, {} metadata)",
                             docs_received, doc.path, doc_chunks, current_chunks.len(), current_metadata.len());
 
                         // Start deadline on first chunk arrival
@@ -518,7 +545,7 @@ async fn batcher_stage(
                         let batch_limit = adaptive_batch_size(&current_chunks);
                         let content_bytes = total_content_bytes(&current_chunks);
 
-                        tracing::debug!("Batcher: batch_limit={}, content_bytes={}, current_chunks={}", 
+                        tracing::debug!("Batcher: batch_limit={}, content_bytes={}, current_chunks={}",
                             batch_limit, content_bytes, current_chunks.len());
 
                         // Flush if batch size reached OR content exceeds memory limit
@@ -526,15 +553,15 @@ async fn batcher_stage(
                             batches_sent += 1;
                             let chunks_count = current_chunks.len();
                             let metadata_count = current_metadata.len();
-                            
+
                             let batch = ChunkBatch {
                                 chunks: std::mem::take(&mut current_chunks),
                                 metadata: std::mem::take(&mut current_metadata),
                             };
-                            
-                            tracing::info!("Batcher: sending batch {} with {} chunks, {} metadata", 
+
+                            tracing::info!("Batcher: sending batch {} with {} chunks, {} metadata",
                                 batches_sent, chunks_count, metadata_count);
-                            
+
                             if tx.send(batch).await.is_err() {
                                 tracing::error!("Batcher: downstream closed");
                                 return Ok(()); // downstream closed
@@ -551,15 +578,15 @@ async fn batcher_stage(
                             batches_sent += 1;
                             let chunks_count = current_chunks.len();
                             let metadata_count = current_metadata.len();
-                            
+
                             let batch = ChunkBatch {
                                 chunks: std::mem::take(&mut current_chunks),
                                 metadata: std::mem::take(&mut current_metadata),
                             };
-                            
-                            tracing::info!("Batcher: sending final batch {} with {} chunks, {} metadata", 
+
+                            tracing::info!("Batcher: sending final batch {} with {} chunks, {} metadata",
                                 batches_sent, chunks_count, metadata_count);
-                            
+
                             let _ = tx.send(batch).await;
                         } else {
                             tracing::info!("Batcher: no remaining data to flush");
@@ -569,23 +596,23 @@ async fn batcher_stage(
                 }
             }
             _ = &mut deadline, if deadline_active => {
-                tracing::debug!("Batcher: deadline fired, chunks={}, metadata={}", 
+                tracing::debug!("Batcher: deadline fired, chunks={}, metadata={}",
                     current_chunks.len(), current_metadata.len());
-                
+
                 // Timeout — flush partial batch if non-empty
                 if !current_chunks.is_empty() || !current_metadata.is_empty() {
                     batches_sent += 1;
                     let chunks_count = current_chunks.len();
                     let metadata_count = current_metadata.len();
-                    
+
                     let batch = ChunkBatch {
                         chunks: std::mem::take(&mut current_chunks),
                         metadata: std::mem::take(&mut current_metadata),
                     };
-                    
-                    tracing::info!("Batcher: sending timeout batch {} with {} chunks, {} metadata", 
+
+                    tracing::info!("Batcher: sending timeout batch {} with {} chunks, {} metadata",
                         batches_sent, chunks_count, metadata_count);
-                    
+
                     if tx.send(batch).await.is_err() {
                         tracing::error!("Batcher: downstream closed on timeout");
                         return Ok(());
@@ -598,7 +625,11 @@ async fn batcher_stage(
         }
     }
 
-    tracing::info!("Batcher: completed — {} docs received, {} batches sent", docs_received, batches_sent);
+    tracing::info!(
+        "Batcher: completed — {} docs received, {} batches sent",
+        docs_received,
+        batches_sent
+    );
     Ok(())
 }
 
@@ -621,13 +652,20 @@ async fn embedder_stage(
 
     while let Some(batch) = rx.recv().await {
         batches_received += 1;
-        tracing::info!("Embedder: received batch {} with {} chunks, {} metadata", 
-            batches_received, batch.chunks.len(), batch.metadata.len());
-        
+        tracing::info!(
+            "Embedder: received batch {} with {} chunks, {} metadata",
+            batches_received,
+            batch.chunks.len(),
+            batch.metadata.len()
+        );
+
         if batch.chunks.is_empty() {
             // Metadata-only batch (files with no chunks) — pass through
             if !batch.metadata.is_empty() {
-                tracing::debug!("Embedder: metadata-only batch, passing through {} metadata", batch.metadata.len());
+                tracing::debug!(
+                    "Embedder: metadata-only batch, passing through {} metadata",
+                    batch.metadata.len()
+                );
                 let embedded = EmbeddedBatch {
                     chunks: Vec::new(),
                     embeddings: Vec::new(),
@@ -642,10 +680,12 @@ async fn embedder_stage(
         }
 
         // Compute content hashes for dedup
-        let hashes: Vec<String> = batch.chunks.iter()
+        let hashes: Vec<String> = batch
+            .chunks
+            .iter()
             .map(|c| blake3::hash(c.content.as_bytes()).to_hex().to_string())
             .collect();
-        
+
         tracing::debug!("Embedder: computed {} hashes", hashes.len());
 
         // Look up cached embeddings
@@ -653,7 +693,7 @@ async fn embedder_stage(
             Ok(c) => {
                 tracing::debug!("Embedder: cache lookup found {} cached embeddings", c.len());
                 c
-            },
+            }
             Err(e) => {
                 tracing::debug!("Embedding cache lookup failed (will re-embed): {}", e);
                 std::collections::HashMap::new()
@@ -675,14 +715,17 @@ async fn embedder_stage(
             }
         }
 
-        tracing::debug!("Embedder: {} chunks from cache, {} need embedding", 
-            batch.chunks.len() - to_embed_texts.len(), to_embed_texts.len());
+        tracing::debug!(
+            "Embedder: {} chunks from cache, {} need embedding",
+            batch.chunks.len() - to_embed_texts.len(),
+            to_embed_texts.len()
+        );
 
         // Embed only new chunks
         if !to_embed_texts.is_empty() {
             let count = to_embed_texts.len();
             tracing::info!("Embedder: calling embedder.embed() for {} texts", count);
-            
+
             match embedder.embed(to_embed_texts).await {
                 Ok(new_embeddings) => {
                     tracing::info!("Embedder: successfully embedded {} chunks", count);
@@ -713,11 +756,15 @@ async fn embedder_stage(
                 }
             }
         } else {
-            tracing::debug!("Embedder: all {} chunks from cache, no embedding needed", batch.chunks.len());
+            tracing::debug!(
+                "Embedder: all {} chunks from cache, no embedding needed",
+                batch.chunks.len()
+            );
         }
 
         if let Some(ref p) = progress {
-            p.chunks_embedded.store(total_embedded + cache_hits, Ordering::Relaxed);
+            p.chunks_embedded
+                .store(total_embedded + cache_hits, Ordering::Relaxed);
         }
 
         // Collect all embeddings (cached + fresh)
@@ -726,9 +773,12 @@ async fn embedder_stage(
             .map(|e| e.unwrap_or_default())
             .collect();
 
-        tracing::info!("Embedder: sending embedded batch with {} chunks, {} embeddings to writer", 
-            batch.chunks.len(), all_embeddings.len());
-        
+        tracing::info!(
+            "Embedder: sending embedded batch with {} chunks, {} embeddings to writer",
+            batch.chunks.len(),
+            all_embeddings.len()
+        );
+
         let embedded = EmbeddedBatch {
             chunks: batch.chunks,
             embeddings: all_embeddings,
@@ -738,21 +788,25 @@ async fn embedder_stage(
             tracing::error!("Embedder: downstream closed");
             break;
         }
-        
+
         tracing::debug!("Embedder: batch sent successfully to writer");
 
         let total = total_embedded + cache_hits;
         if total.is_multiple_of(256) && total > 0 {
             tracing::info!(
                 "Embedder: {} chunks processed ({} embedded, {} from cache)",
-                total, total_embedded, cache_hits
+                total,
+                total_embedded,
+                cache_hits
             );
         }
     }
 
     tracing::info!(
         "Embedder: done — {} batches received, {} embedded, {} from cache",
-        batches_received, total_embedded, cache_hits
+        batches_received,
+        total_embedded,
+        cache_hits
     );
     Ok(())
 }
@@ -775,17 +829,26 @@ async fn writer_stage(
     tracing::info!("Writer: started, waiting for embedded batches");
 
     while let Some(batch) = rx.recv().await {
-        tracing::debug!("Writer: received batch with {} chunks, {} metadata", 
-            batch.chunks.len(), batch.metadata.len());
-        
+        tracing::debug!(
+            "Writer: received batch with {} chunks, {} metadata",
+            batch.chunks.len(),
+            batch.metadata.len()
+        );
+
         // Write chunks+embeddings to LanceDB immediately
         if !batch.chunks.is_empty() {
             tracing::debug!("Writer: writing {} chunks to LanceDB", batch.chunks.len());
             let mut lance_guard = lance.lock().await;
-            if let Err(e) = lance_guard.upsert_chunks(&batch.chunks, &batch.embeddings).await {
+            if let Err(e) = lance_guard
+                .upsert_chunks(&batch.chunks, &batch.embeddings)
+                .await
+            {
                 tracing::error!("Writer: LanceDB error: {}", e);
             } else {
-                tracing::debug!("Writer: successfully wrote {} chunks to LanceDB", batch.chunks.len());
+                tracing::debug!(
+                    "Writer: successfully wrote {} chunks to LanceDB",
+                    batch.chunks.len()
+                );
             }
             total_chunks += batch.chunks.len();
         }
@@ -844,7 +907,8 @@ async fn flush_sqlite_batch(
 
     // Separate metadata collection from SQLite write to avoid holding
     // the collection lock during I/O.
-    let mut metadata_for_collection: Vec<(i64, ParsedFileMetadata)> = Vec::with_capacity(batch.len());
+    let mut metadata_for_collection: Vec<(i64, ParsedFileMetadata)> =
+        Vec::with_capacity(batch.len());
 
     // Use a transaction for all writes in this batch
     let pool = sqlite.pool();
@@ -878,11 +942,7 @@ async fn flush_sqlite_batch(
         let file_id = match file_id_result {
             Ok(id) => id,
             Err(e) => {
-                tracing::error!(
-                    "Writer: upsert_file failed for {}: {}",
-                    file_meta.path,
-                    e
-                );
+                tracing::error!("Writer: upsert_file failed for {}: {}", file_meta.path, e);
                 continue;
             }
         };
@@ -947,13 +1007,14 @@ async fn flush_sqlite_batch(
                 };
 
                 // Find or create dependency
-                let dep_id: Option<i64> =
-                    sqlx::query_scalar("SELECT id FROM dependencies WHERE name = ? AND ecosystem = ?")
-                        .bind(&pkg_name)
-                        .bind(ecosystem)
-                        .fetch_optional(&mut *tx)
-                        .await
-                        .unwrap_or(None);
+                let dep_id: Option<i64> = sqlx::query_scalar(
+                    "SELECT id FROM dependencies WHERE name = ? AND ecosystem = ?",
+                )
+                .bind(&pkg_name)
+                .bind(ecosystem)
+                .fetch_optional(&mut *tx)
+                .await
+                .unwrap_or(None);
 
                 let dep_id = match dep_id {
                     Some(id) => id,
@@ -1049,18 +1110,21 @@ async fn flush_sqlite_batch(
         }
 
         // Collect metadata for cross-stack linking (clone the parts we need)
-        metadata_for_collection.push((file_id, ParsedFileMetadata {
-            path: file_meta.path,
-            hash: file_meta.hash,
-            modified: file_meta.modified,
-            language: file_meta.language,
-            symbols: file_meta.symbols,
-            refs: file_meta.refs,
-            imports: file_meta.imports,
-            domain: file_meta.domain,
-            tech_stack: file_meta.tech_stack,
-            content: file_meta.content,
-        }));
+        metadata_for_collection.push((
+            file_id,
+            ParsedFileMetadata {
+                path: file_meta.path,
+                hash: file_meta.hash,
+                modified: file_meta.modified,
+                language: file_meta.language,
+                symbols: file_meta.symbols,
+                refs: file_meta.refs,
+                imports: file_meta.imports,
+                domain: file_meta.domain,
+                tech_stack: file_meta.tech_stack,
+                content: file_meta.content,
+            },
+        ));
     }
 
     // Commit transaction
@@ -1072,7 +1136,11 @@ async fn flush_sqlite_batch(
     // Queue committed files for summarization
     for &(file_id, _) in &metadata_for_collection {
         if let Err(e) = sqlite.queue_for_summary(file_id, 0).await {
-            tracing::debug!("Writer: queue_for_summary failed for file_id={}: {}", file_id, e);
+            tracing::debug!(
+                "Writer: queue_for_summary failed for file_id={}: {}",
+                file_id,
+                e
+            );
         }
     }
 
@@ -1092,9 +1160,7 @@ pub(crate) fn extract_package_name(import_path: &str, language: SupportedLanguag
             .next()
             .unwrap_or(import_path)
             .to_string(),
-        SupportedLanguage::TypeScript
-        | SupportedLanguage::JavaScript
-        | SupportedLanguage::Vue => {
+        SupportedLanguage::TypeScript | SupportedLanguage::JavaScript | SupportedLanguage::Vue => {
             if import_path.starts_with('@') {
                 let parts: Vec<&str> = import_path.split('/').collect();
                 if parts.len() >= 2 {

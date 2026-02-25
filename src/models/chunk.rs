@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use serde::{Deserialize, Serialize};
 
 /// Represents an indexed file in the database
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -25,7 +25,18 @@ pub struct Symbol {
 }
 
 /// Symbol kind enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Archive,
+    RkyvSerialize,
+    RkyvDeserialize,
+)]
 #[archive(check_bytes)]
 #[serde(rename_all = "snake_case")]
 pub enum SymbolKind {
@@ -77,7 +88,7 @@ impl SymbolKind {
             _ => SymbolKind::Function, // Default fallback
         }
     }
-    
+
     /// Convert to string (for SQLite storage)
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -115,9 +126,12 @@ impl<'r> sqlx::Decode<'r, sqlx::Sqlite> for SymbolKind {
 
 // Implement sqlx::Encode for writing to database
 impl<'q> sqlx::Encode<'q, sqlx::Sqlite> for SymbolKind {
-    fn encode_by_ref(&self, args: &mut Vec<sqlx::sqlite::SqliteArgumentValue<'q>>) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+    fn encode_by_ref(
+        &self,
+        args: &mut Vec<sqlx::sqlite::SqliteArgumentValue<'q>>,
+    ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
         args.push(sqlx::sqlite::SqliteArgumentValue::Text(
-            std::borrow::Cow::Borrowed(self.as_str())
+            std::borrow::Cow::Borrowed(self.as_str()),
         ));
         Ok(sqlx::encode::IsNull::No)
     }
@@ -182,18 +196,18 @@ pub struct SymbolReference {
 #[serde(rename_all = "snake_case")]
 #[allow(dead_code)]
 pub enum ReferenceKind {
-    Call,       // Function/method call
-    Import,     // Use/import statement
-    TypeUsage,  // Type annotation
-    Inherit,    // Impl for, extends, implements
+    Call,      // Function/method call
+    Import,    // Use/import statement
+    TypeUsage, // Type annotation
+    Inherit,   // Impl for, extends, implements
 }
 
 /// Import/dependency information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportInfo {
-    pub path: String,           // "./components/Button" or "lodash"
-    pub items: Vec<String>,     // ["Button", "ButtonProps"] or ["default"]
-    pub is_relative: bool,      // true for local imports
+    pub path: String,       // "./components/Button" or "lodash"
+    pub items: Vec<String>, // ["Button", "ButtonProps"] or ["default"]
+    pub is_relative: bool,  // true for local imports
     pub line: u32,
 }
 
@@ -212,7 +226,7 @@ pub struct ContextBundle {
 pub struct DependencyFile {
     pub path: String,
     pub content: String,
-    pub reason: String,  // "imported type", "imported component", etc.
+    pub reason: String, // "imported type", "imported component", etc.
     pub depth: u32,
 }
 
@@ -222,7 +236,7 @@ pub struct Dependency {
     pub id: i64,
     pub name: String,
     pub version: String,
-    pub ecosystem: String,  // "cargo" or "npm"
+    pub ecosystem: String, // "cargo" or "npm"
     pub features: Option<String>,
     pub dev_only: i32,
     pub updated_at: i64,
@@ -327,7 +341,9 @@ pub struct VueTree {
 // === MCP Support Types ===
 
 /// Symbol with file path (for MCP tools)
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, sqlx::FromRow, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 #[archive(check_bytes)]
 pub struct SymbolWithPath {
     pub id: i64,
@@ -342,7 +358,9 @@ pub struct SymbolWithPath {
 }
 
 /// Reference with file path (for MCP tools)
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, sqlx::FromRow, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 #[archive(check_bytes)]
 pub struct ReferenceWithPath {
     pub id: i64,
@@ -353,7 +371,9 @@ pub struct ReferenceWithPath {
 }
 
 /// Dependency usage info with file path (for MCP tools)
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, sqlx::FromRow, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 #[archive(check_bytes)]
 pub struct DependencyUsageInfo {
     pub id: i64,
@@ -393,7 +413,7 @@ pub struct FileSummary {
     pub id: i64,
     pub file_id: i64,
     pub summary: String,
-    pub summary_source: String,     // 'llm', 'docstring', 'comment'
+    pub summary_source: String, // 'llm', 'docstring', 'comment'
     pub model_name: Option<String>,
     pub confidence: Option<f64>,
     pub created_at: i64,
@@ -437,7 +457,9 @@ pub struct TypeFingerprint {
 }
 
 /// Cross-stack link между бэкенд и фронтенд сущностями
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, Archive, RkyvSerialize, RkyvDeserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, sqlx::FromRow, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 #[archive(check_bytes)]
 pub struct CrossStackLink {
     pub id: i64,
@@ -457,5 +479,5 @@ pub struct CrossStackLink {
 pub struct TypeField {
     pub name: String,
     pub field_type: Option<String>,
-    pub normalized: String,  // lower, no separators: "userid" <- "user_id" / "userId"
+    pub normalized: String, // lower, no separators: "userid" <- "user_id" / "userId"
 }

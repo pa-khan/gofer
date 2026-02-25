@@ -45,9 +45,7 @@ impl goferError {
             Self::ParseError(_) => PARSE_ERROR,
             Self::InvalidParams(_) => INVALID_PARAMS,
             Self::MethodNotFound(_) => METHOD_NOT_FOUND,
-            Self::Storage(_) | Self::Lance(_) | Self::Embedder(_) | Self::Parser(_) => {
-                SERVER_ERROR
-            }
+            Self::Storage(_) | Self::Lance(_) | Self::Embedder(_) | Self::Parser(_) => SERVER_ERROR,
             Self::Internal(_) => INTERNAL_ERROR,
         }
     }

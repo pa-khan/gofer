@@ -39,10 +39,7 @@ pub async fn tool_format_file(args: Value, ctx: &ToolContext) -> Result<Value> {
         return Err(goferError::InvalidParams(format!("File not found: {}", path)).into());
     }
 
-    let ext = abs_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = abs_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     // Detect formatter based on extension
     let formatter_name = formatter.unwrap_or_else(|| match ext {
@@ -113,10 +110,7 @@ pub async fn tool_lint_file(args: Value, ctx: &ToolContext) -> Result<Value> {
         return Err(goferError::InvalidParams(format!("File not found: {}", path)).into());
     }
 
-    let ext = abs_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = abs_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     // Detect linter based on extension
     let linter_name = match ext {
@@ -183,10 +177,7 @@ pub async fn tool_apply_lint_fix(args: Value, ctx: &ToolContext) -> Result<Value
         return Err(goferError::InvalidParams(format!("File not found: {}", path)).into());
     }
 
-    let ext = abs_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = abs_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     // Run auto-fix based on file type
     let result = match ext {

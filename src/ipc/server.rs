@@ -76,10 +76,7 @@ pub async fn run_daemon(state: Arc<DaemonState>) -> Result<()> {
     Ok(())
 }
 
-async fn handle_connection(
-    stream: tokio::net::UnixStream,
-    state: Arc<DaemonState>,
-) -> Result<()> {
+async fn handle_connection(stream: tokio::net::UnixStream, state: Arc<DaemonState>) -> Result<()> {
     let (reader, writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
     let writer = BufWriter::new(writer);
@@ -108,7 +105,9 @@ async fn handle_connection(
                 writer.write_all(b"\n").await?;
                 writer.flush().await?;
                 Ok::<(), std::io::Error>(())
-            }.await {
+            }
+            .await
+            {
                 tracing::error!("Write error: {}", e);
                 break;
             }
@@ -127,10 +126,7 @@ async fn handle_connection(
         line.clear();
 
         // Read with timeout to detect idle connections
-        let read_result = tokio::time::timeout(
-            IDLE_TIMEOUT,
-            reader.read_line(&mut line)
-        ).await;
+        let read_result = tokio::time::timeout(IDLE_TIMEOUT, reader.read_line(&mut line)).await;
 
         let n = match read_result {
             Ok(Ok(n)) => n,
@@ -184,7 +180,8 @@ async fn handle_connection(
                             match serde_json::from_value::<DaemonRequest>(v) {
                                 Ok(req) => handle_request(req, &st).await,
                                 Err(e) => {
-                                    let (code, msg) = goferError::ParseError(e.to_string()).into_rpc();
+                                    let (code, msg) =
+                                        goferError::ParseError(e.to_string()).into_rpc();
                                     DaemonResponse::error(Value::Null, code, msg)
                                 }
                             }
@@ -209,7 +206,8 @@ async fn handle_connection(
                 let response = match serde_json::from_str::<DaemonRequest>(trimmed) {
                     Ok(req) => {
                         // Check for progress token in _meta
-                        let progress_token = req.params
+                        let progress_token = req
+                            .params
                             .get("_meta")
                             .and_then(|m| m.get("progressToken"))
                             .and_then(|t| t.as_str())
@@ -316,9 +314,7 @@ async fn handle_request(req: DaemonRequest, state: &Arc<DaemonState>) -> DaemonR
                 }
             }),
         ),
-        "initialized" | "notifications/initialized" => {
-            DaemonResponse::success(id, json!({}))
-        }
+        "initialized" | "notifications/initialized" => DaemonResponse::success(id, json!({})),
         "ping" => DaemonResponse::success(id, json!({})),
         "tools/list" => handle_tools_list(id, &req, state).await,
         "tools/call" => handle_tools_call(id, &req, state).await,
@@ -353,10 +349,7 @@ async fn handle_register_project(
             let _ = tokio::fs::create_dir_all(&index_dir).await;
 
             tracing::info!("Registered project: {} -> {}", project_path, uuid);
-            DaemonResponse::success(
-                id,
-                json!({ "id": uuid, "path": project_path }),
-            )
+            DaemonResponse::success(id, json!({ "id": uuid, "path": project_path }))
         }
         Err(e) => DaemonResponse::error(id, -32000, format!("Registration failed: {}", e)),
     }
@@ -480,19 +473,17 @@ async fn handle_summary_stats(
     };
 
     match state.get_or_load_project(project_path).await {
-        Ok(project) => {
-            match project.sqlite.get_summary_queue_stats().await {
-                Ok((pending, processing, failed)) => DaemonResponse::success(
-                    id,
-                    json!({
-                        "pending": pending,
-                        "processing": processing,
-                        "failed": failed,
-                    }),
-                ),
-                Err(e) => DaemonResponse::error(id, -32000, format!("Stats query failed: {}", e)),
-            }
-        }
+        Ok(project) => match project.sqlite.get_summary_queue_stats().await {
+            Ok((pending, processing, failed)) => DaemonResponse::success(
+                id,
+                json!({
+                    "pending": pending,
+                    "processing": processing,
+                    "failed": failed,
+                }),
+            ),
+            Err(e) => DaemonResponse::error(id, -32000, format!("Stats query failed: {}", e)),
+        },
         Err(e) => DaemonResponse::error(id, -32000, format!("Project load failed: {}", e)),
     }
 }
@@ -510,16 +501,15 @@ async fn handle_shutdown(id: Value, state: &Arc<DaemonState>) -> DaemonResponse 
     DaemonResponse::success(id, json!({ "message": "Shutting down" }))
 }
 
-async fn handle_reindex(
-    id: Value,
-    params: &Value,
-    state: &Arc<DaemonState>,
-) -> DaemonResponse {
+async fn handle_reindex(id: Value, params: &Value, state: &Arc<DaemonState>) -> DaemonResponse {
     let project_path = match params.get("project_path").and_then(|v| v.as_str()) {
         Some(p) => p,
         None => return DaemonResponse::error(id, -32602, "Missing project_path".into()),
     };
-    let force = params.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+    let force = params
+        .get("force")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let path = params.get("path").and_then(|v| v.as_str());
 
     if force {
@@ -527,9 +517,13 @@ async fn handle_reindex(
         if let Ok(project) = state.get_or_load_project(project_path).await {
             // Очистить SQLite данные (файлы, символы, ссылки)
             let pool = project.sqlite.pool();
-            let _ = sqlx::query("DELETE FROM symbol_references").execute(pool).await;
+            let _ = sqlx::query("DELETE FROM symbol_references")
+                .execute(pool)
+                .await;
             let _ = sqlx::query("DELETE FROM symbols").execute(pool).await;
-            let _ = sqlx::query("DELETE FROM dependency_usage").execute(pool).await;
+            let _ = sqlx::query("DELETE FROM dependency_usage")
+                .execute(pool)
+                .await;
             let _ = sqlx::query("DELETE FROM files").execute(pool).await;
             tracing::info!("Force reindex: cleared SQLite data for {}", project_path);
         }
@@ -545,7 +539,10 @@ async fn handle_reindex(
                     1,
                 );
                 match indexer.index_file(std::path::Path::new(file_path)).await {
-                    Ok(_) => DaemonResponse::success(id, json!({ "message": format!("Reindexed: {}", file_path) })),
+                    Ok(_) => DaemonResponse::success(
+                        id,
+                        json!({ "message": format!("Reindexed: {}", file_path) }),
+                    ),
                     Err(e) => DaemonResponse::error(id, -32000, format!("Reindex failed: {}", e)),
                 }
             }
@@ -591,35 +588,29 @@ async fn handle_tools_call(
     req: &DaemonRequest,
     state: &Arc<DaemonState>,
 ) -> DaemonResponse {
-    let name = req.params.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let name = req
+        .params
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let args = req.params.get("arguments").cloned().unwrap_or(json!({}));
     let project_path = req.project_path();
 
     let Some(pp) = project_path else {
-        return DaemonResponse::error(
-            id,
-            -32602,
-            "Missing project_path for tool call".into(),
-        );
+        return DaemonResponse::error(id, -32602, "Missing project_path for tool call".into());
     };
 
     // Feature 015: Check resource limits before processing request
     let _request_guard = match state.resource_limits.try_acquire_request() {
         Ok(guard) => guard,
         Err(e) => {
-            return DaemonResponse::error(
-                id,
-                -32001,
-                format!("Resource limit exceeded: {}", e),
-            )
+            return DaemonResponse::error(id, -32001, format!("Resource limit exceeded: {}", e))
         }
     };
 
     let project = match state.get_or_load_project(pp).await {
         Ok(p) => p,
-        Err(e) => {
-            return DaemonResponse::error(id, -32000, format!("Project load failed: {}", e))
-        }
+        Err(e) => return DaemonResponse::error(id, -32000, format!("Project load failed: {}", e)),
     };
 
     // Try language services first
@@ -651,8 +642,8 @@ async fn handle_tools_call(
         reranker: Arc::clone(&state.reranker),
         root_path: Arc::new(project.path.clone()),
         cache: Arc::clone(&project.cache),
-        embedding_circuit: Arc::clone(&state.embedding_circuit),  // Feature 016
-        vector_circuit: Arc::clone(&state.vector_circuit),  // Feature 016
+        embedding_circuit: Arc::clone(&state.embedding_circuit), // Feature 016
+        vector_circuit: Arc::clone(&state.vector_circuit),       // Feature 016
         rust_analyzer: Arc::clone(&project.rust_analyzer),
         language_services: Arc::clone(&project.language_services),
     };
@@ -683,10 +674,7 @@ async fn handle_tools_call(
     match result {
         Ok(value) => {
             let text = serde_json::to_string_pretty(&value).unwrap_or_default();
-            DaemonResponse::success(
-                id,
-                json!({ "content": [{"type": "text", "text": text}] }),
-            )
+            DaemonResponse::success(id, json!({ "content": [{"type": "text", "text": text}] }))
         }
         Err(e) => DaemonResponse::success(
             id,
@@ -763,27 +751,19 @@ async fn handle_resources_read(
         reranker: Arc::clone(&state.reranker),
         root_path: Arc::new(project.path.clone()),
         cache: Arc::clone(&project.cache),
-        embedding_circuit: Arc::clone(&state.embedding_circuit),  // Feature 016
-        vector_circuit: Arc::clone(&state.vector_circuit),  // Feature 016
+        embedding_circuit: Arc::clone(&state.embedding_circuit), // Feature 016
+        vector_circuit: Arc::clone(&state.vector_circuit),       // Feature 016
         rust_analyzer: Arc::clone(&project.rust_analyzer),
         language_services: Arc::clone(&project.language_services),
     };
 
     let result = match uri {
         "project://context" => resource_project_context(&ctx).await,
-        "project://tree" => {
-            tools::dispatch("project_tree", json!({"depth": 3}), &ctx).await
-        }
+        "project://tree" => tools::dispatch("project_tree", json!({"depth": 3}), &ctx).await,
         "project://stats" => resource_project_stats(&ctx).await,
-        "project://config" => {
-            tools::dispatch("get_config_keys", json!({}), &ctx).await
-        }
+        "project://config" => tools::dispatch("get_config_keys", json!({}), &ctx).await,
         _ => {
-            return DaemonResponse::error(
-                id,
-                -32602,
-                format!("Unknown resource URI: {}", uri),
-            );
+            return DaemonResponse::error(id, -32602, format!("Unknown resource URI: {}", uri));
         }
     };
 
@@ -810,7 +790,8 @@ async fn resource_project_context(ctx: &tools::ToolContext) -> anyhow::Result<Va
 
     let rules: Vec<Rule> = ctx.sqlite.get_rules().await?;
     let golden_samples: Vec<(String, Option<String>)> = ctx.sqlite.get_golden_samples().await?;
-    let deps: Vec<crate::models::chunk::Dependency> = ctx.sqlite.get_dependencies_filtered(None).await?;
+    let deps: Vec<crate::models::chunk::Dependency> =
+        ctx.sqlite.get_dependencies_filtered(None).await?;
 
     Ok(json!({
         "rules": rules.iter().map(|r| json!({
@@ -837,9 +818,12 @@ async fn resource_project_context(ctx: &tools::ToolContext) -> anyhow::Result<Va
 
 async fn resource_project_stats(ctx: &tools::ToolContext) -> anyhow::Result<Value> {
     let domain_stats: Vec<(String, i64)> = ctx.sqlite.get_domain_stats().await?;
-    let symbols: Vec<crate::models::chunk::SymbolWithPath> = ctx.sqlite.get_symbols(None, None, 0, 10000).await?;
-    let summaries: Vec<crate::models::chunk::FileSummaryWithPath> = ctx.sqlite.get_all_summaries().await?;
-    let errors: Vec<crate::models::chunk::ActiveError> = ctx.sqlite.get_errors(None, None, 0, 10000).await?;
+    let symbols: Vec<crate::models::chunk::SymbolWithPath> =
+        ctx.sqlite.get_symbols(None, None, 0, 10000).await?;
+    let summaries: Vec<crate::models::chunk::FileSummaryWithPath> =
+        ctx.sqlite.get_all_summaries().await?;
+    let errors: Vec<crate::models::chunk::ActiveError> =
+        ctx.sqlite.get_errors(None, None, 0, 10000).await?;
 
     // Count symbols by kind
     let mut kind_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
@@ -899,7 +883,11 @@ async fn handle_prompts_get(
     req: &DaemonRequest,
     state: &Arc<DaemonState>,
 ) -> DaemonResponse {
-    let name = req.params.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let name = req
+        .params
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let args = req.params.get("arguments").cloned().unwrap_or(json!({}));
     let project_path = req.project_path();
 
@@ -919,8 +907,8 @@ async fn handle_prompts_get(
         reranker: Arc::clone(&state.reranker),
         root_path: Arc::new(project.path.clone()),
         cache: Arc::clone(&project.cache),
-        embedding_circuit: Arc::clone(&state.embedding_circuit),  // Feature 016
-        vector_circuit: Arc::clone(&state.vector_circuit),  // Feature 016
+        embedding_circuit: Arc::clone(&state.embedding_circuit), // Feature 016
+        vector_circuit: Arc::clone(&state.vector_circuit),       // Feature 016
         rust_analyzer: Arc::clone(&project.rust_analyzer),
         language_services: Arc::clone(&project.language_services),
     };
@@ -940,10 +928,7 @@ async fn handle_prompts_get(
     }
 }
 
-async fn prompt_review_code(
-    args: &Value,
-    ctx: &tools::ToolContext,
-) -> anyhow::Result<Vec<Value>> {
+async fn prompt_review_code(args: &Value, ctx: &tools::ToolContext) -> anyhow::Result<Vec<Value>> {
     let file = args.get("file").and_then(|v| v.as_str()).unwrap_or("");
     if file.is_empty() {
         return Err(anyhow::anyhow!("'file' argument is required"));
@@ -954,13 +939,15 @@ async fn prompt_review_code(
         "context_bundle",
         json!({"file": file, "skeleton_deps_only": true, "depth": 2}),
         ctx,
-    ).await?;
+    )
+    .await?;
 
     let rules: Vec<crate::models::chunk::Rule> = ctx.sqlite.get_rules().await?;
     let rules_text = if rules.is_empty() {
         "No project rules defined.".to_string()
     } else {
-        rules.iter()
+        rules
+            .iter()
             .map(|r| format!("- [{}] (p={}) {}", r.category, r.priority, r.rule))
             .collect::<Vec<_>>()
             .join("\n")
@@ -968,18 +955,16 @@ async fn prompt_review_code(
 
     let bundle_text = serde_json::to_string_pretty(&bundle)?;
 
-    Ok(vec![
-        json!({
-            "role": "user",
-            "content": {
-                "type": "text",
-                "text": format!(
-                    "Review the following code file: `{}`\n\n## Project Rules\n{}\n\n## Context Bundle\n```json\n{}\n```\n\nProvide a thorough code review focusing on:\n1. Correctness and potential bugs\n2. Adherence to project rules\n3. Performance concerns\n4. Security issues\n5. Code style and readability",
-                    file, rules_text, bundle_text
-                )
-            }
-        })
-    ])
+    Ok(vec![json!({
+        "role": "user",
+        "content": {
+            "type": "text",
+            "text": format!(
+                "Review the following code file: `{}`\n\n## Project Rules\n{}\n\n## Context Bundle\n```json\n{}\n```\n\nProvide a thorough code review focusing on:\n1. Correctness and potential bugs\n2. Adherence to project rules\n3. Performance concerns\n4. Security issues\n5. Code style and readability",
+                file, rules_text, bundle_text
+            )
+        }
+    })])
 }
 
 async fn prompt_explain_module(
@@ -991,51 +976,53 @@ async fn prompt_explain_module(
         return Err(anyhow::anyhow!("'file' argument is required"));
     }
 
-    let skeleton: serde_json::Value = tools::dispatch("skeleton", json!({"file": file}), ctx).await?;
-    let symbols: serde_json::Value = tools::dispatch("get_symbols", json!({"file": file}), ctx).await?;
-    let summary: serde_json::Value = tools::dispatch("get_summary", json!({"file": file}), ctx).await?;
+    let skeleton: serde_json::Value =
+        tools::dispatch("skeleton", json!({"file": file}), ctx).await?;
+    let symbols: serde_json::Value =
+        tools::dispatch("get_symbols", json!({"file": file}), ctx).await?;
+    let summary: serde_json::Value =
+        tools::dispatch("get_summary", json!({"file": file}), ctx).await?;
 
-    Ok(vec![
-        json!({
-            "role": "user",
-            "content": {
-                "type": "text",
-                "text": format!(
-                    "Explain the module `{}`.\n\n## Summary\n```json\n{}\n```\n\n## Skeleton\n```json\n{}\n```\n\n## Symbols\n```json\n{}\n```\n\nProvide:\n1. Overall purpose and responsibility\n2. Key data structures and their roles\n3. Main functions/methods and their flow\n4. Dependencies and how they're used\n5. How this module fits into the larger architecture",
-                    file,
-                    serde_json::to_string_pretty(&summary)?,
-                    serde_json::to_string_pretty(&skeleton)?,
-                    serde_json::to_string_pretty(&symbols)?
-                )
-            }
-        })
-    ])
+    Ok(vec![json!({
+        "role": "user",
+        "content": {
+            "type": "text",
+            "text": format!(
+                "Explain the module `{}`.\n\n## Summary\n```json\n{}\n```\n\n## Skeleton\n```json\n{}\n```\n\n## Symbols\n```json\n{}\n```\n\nProvide:\n1. Overall purpose and responsibility\n2. Key data structures and their roles\n3. Main functions/methods and their flow\n4. Dependencies and how they're used\n5. How this module fits into the larger architecture",
+                file,
+                serde_json::to_string_pretty(&summary)?,
+                serde_json::to_string_pretty(&skeleton)?,
+                serde_json::to_string_pretty(&symbols)?
+            )
+        }
+    })])
 }
 
-async fn prompt_find_related(
-    args: &Value,
-    ctx: &tools::ToolContext,
-) -> anyhow::Result<Vec<Value>> {
+async fn prompt_find_related(args: &Value, ctx: &tools::ToolContext) -> anyhow::Result<Vec<Value>> {
     let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
     if query.is_empty() {
         return Err(anyhow::anyhow!("'query' argument is required"));
     }
 
-    let search_results: serde_json::Value = tools::dispatch("search", json!({"query": query, "limit": 10}), ctx).await?;
-    let purpose_results: serde_json::Value = tools::dispatch("search_by_purpose", json!({"query": query, "limit": 5}), ctx).await?;
+    let search_results: serde_json::Value =
+        tools::dispatch("search", json!({"query": query, "limit": 10}), ctx).await?;
+    let purpose_results: serde_json::Value = tools::dispatch(
+        "search_by_purpose",
+        json!({"query": query, "limit": 5}),
+        ctx,
+    )
+    .await?;
 
-    Ok(vec![
-        json!({
-            "role": "user",
-            "content": {
-                "type": "text",
-                "text": format!(
-                    "Find all code related to: \"{}\"\n\n## Semantic Search Results\n```json\n{}\n```\n\n## Purpose-Based Results\n```json\n{}\n```\n\nAnalyze these results and:\n1. Identify the key files involved\n2. Map the data/control flow related to this concept\n3. Identify any missing pieces or gaps\n4. Suggest where changes should be made if modifying this feature",
-                    query,
-                    serde_json::to_string_pretty(&search_results)?,
-                    serde_json::to_string_pretty(&purpose_results)?
-                )
-            }
-        })
-    ])
+    Ok(vec![json!({
+        "role": "user",
+        "content": {
+            "type": "text",
+            "text": format!(
+                "Find all code related to: \"{}\"\n\n## Semantic Search Results\n```json\n{}\n```\n\n## Purpose-Based Results\n```json\n{}\n```\n\nAnalyze these results and:\n1. Identify the key files involved\n2. Map the data/control flow related to this concept\n3. Identify any missing pieces or gaps\n4. Suggest where changes should be made if modifying this feature",
+                query,
+                serde_json::to_string_pretty(&search_results)?,
+                serde_json::to_string_pretty(&purpose_results)?
+            )
+        }
+    })])
 }

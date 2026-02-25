@@ -33,10 +33,10 @@ fn sanitize_fts5_query(query: &str) -> String {
     if trimmed.is_empty() {
         return String::new();
     }
-    
+
     // Escape double quotes by doubling them
     let escaped = trimmed.replace('"', "\"\"");
-    
+
     // Wrap in double quotes for exact phrase matching
     // This disables special operators and treats the input as a literal phrase
     format!("\"{}\"", escaped)
@@ -61,8 +61,9 @@ impl QueryMetrics {
 
     pub fn record_query(&self, duration_ms: u64) {
         self.total_queries.fetch_add(1, Ordering::Relaxed);
-        self.total_query_time_ms.fetch_add(duration_ms, Ordering::Relaxed);
-        
+        self.total_query_time_ms
+            .fetch_add(duration_ms, Ordering::Relaxed);
+
         // Queries over 100ms are considered slow
         if duration_ms > 100 {
             self.slow_queries.fetch_add(1, Ordering::Relaxed);
@@ -99,17 +100,17 @@ impl SqliteStorage {
         }
 
         let connection_string = format!("sqlite:{}?mode=rwc", db_path);
-        
+
         // Feature 015: Enhanced connection pooling
         let pool = SqlitePoolOptions::new()
-            .max_connections(20)          // Max concurrent connections
-            .min_connections(5)           // Keep 5 connections always ready
-            .acquire_timeout(std::time::Duration::from_secs(5))  // Wait up to 5s for connection
+            .max_connections(20) // Max concurrent connections
+            .min_connections(5) // Keep 5 connections always ready
+            .acquire_timeout(std::time::Duration::from_secs(5)) // Wait up to 5s for connection
             .idle_timeout(Some(std::time::Duration::from_secs(300))) // Close idle connections after 5min
             .max_lifetime(Some(std::time::Duration::from_secs(1800))) // Recycle connections every 30min
             .connect(&connection_string)
             .await?;
-        
+
         // Enable WAL mode and optimize for bulk operations
         sqlx::query("PRAGMA journal_mode = WAL")
             .execute(&pool)
@@ -130,12 +131,12 @@ impl SqliteStorage {
             .execute(&pool)
             .await?;
 
-        Ok(Self { 
+        Ok(Self {
             pool,
             metrics: QueryMetrics::new(),
         })
     }
-    
+
     /// Get pool for transaction support
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
@@ -149,7 +150,11 @@ impl SqliteStorage {
     /// Helper to execute a query with metrics tracking
     async fn execute_with_metrics<'a, F, T>(&self, f: F) -> Result<T>
     where
-        F: FnOnce(&SqlitePool) -> std::pin::Pin<Box<dyn std::future::Future<Output = std::result::Result<T, sqlx::Error>> + Send + 'a>>,
+        F: FnOnce(
+            &SqlitePool,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = std::result::Result<T, sqlx::Error>> + Send + 'a>,
+        >,
     {
         let start = Instant::now();
         let result = f(&self.pool).await?;
@@ -160,9 +165,7 @@ impl SqliteStorage {
 
     /// Run migrations
     pub async fn migrate(&self) -> Result<()> {
-        sqlx::migrate!("./migrations")
-            .run(&self.pool)
-            .await?;
+        sqlx::migrate!("./migrations").run(&self.pool).await?;
 
         tracing::info!("SQLite migrations completed");
         Ok(())
@@ -182,18 +185,24 @@ impl SqliteStorage {
         let result: (String,) = sqlx::query_as("PRAGMA integrity_check(1)")
             .fetch_one(&self.pool)
             .await?;
-        
+
         if result.0 == "ok" {
             Ok(())
         } else {
-            Err(StorageError::Database(sqlx::Error::Protocol(
-                format!("Database integrity check failed: {}", result.0)
-            )))
+            Err(StorageError::Database(sqlx::Error::Protocol(format!(
+                "Database integrity check failed: {}",
+                result.0
+            ))))
         }
     }
 
     /// Insert or update a file record
-    pub async fn upsert_file(&self, path: &str, last_modified: i64, content_hash: &str) -> Result<i64> {
+    pub async fn upsert_file(
+        &self,
+        path: &str,
+        last_modified: i64,
+        content_hash: &str,
+    ) -> Result<i64> {
         let result = sqlx::query(
             r#"
             INSERT INTO files (path, last_modified, content_hash)
@@ -202,7 +211,7 @@ impl SqliteStorage {
                 last_modified = excluded.last_modified,
                 content_hash = excluded.content_hash
             RETURNING id
-            "#
+            "#,
         )
         .bind(path)
         .bind(last_modified)
@@ -216,7 +225,7 @@ impl SqliteStorage {
     /// Get file by path
     pub async fn get_file(&self, path: &str) -> Result<Option<IndexedFile>> {
         let file = sqlx::query_as::<_, IndexedFile>(
-            "SELECT id, path, last_modified, content_hash FROM files WHERE path = ?"
+            "SELECT id, path, last_modified, content_hash FROM files WHERE path = ?",
         )
         .bind(path)
         .fetch_optional(&self.pool)
@@ -228,7 +237,7 @@ impl SqliteStorage {
     /// Check if file needs reindexing
     pub async fn needs_reindex(&self, path: &str, content_hash: &str) -> Result<bool> {
         let existing = self.get_file(path).await?;
-        
+
         match existing {
             Some(file) => Ok(file.content_hash != content_hash),
             None => Ok(true),
@@ -236,13 +245,14 @@ impl SqliteStorage {
     }
 
     /// Get all file hashes for batch comparison
-    pub async fn get_all_file_hashes(&self) -> Result<std::collections::HashMap<String, (String, i64)>> {
-        let rows: Vec<(String, String, i64)> = sqlx::query_as(
-            "SELECT path, content_hash, last_modified FROM files"
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        
+    pub async fn get_all_file_hashes(
+        &self,
+    ) -> Result<std::collections::HashMap<String, (String, i64)>> {
+        let rows: Vec<(String, String, i64)> =
+            sqlx::query_as("SELECT path, content_hash, last_modified FROM files")
+                .fetch_all(&self.pool)
+                .await?;
+
         Ok(rows.into_iter().map(|(p, h, m)| (p, (h, m))).collect())
     }
 
@@ -252,7 +262,7 @@ impl SqliteStorage {
             .bind(path)
             .execute(&self.pool)
             .await?;
-        
+
         Ok(())
     }
 
@@ -280,7 +290,7 @@ impl SqliteStorage {
                 r#"
                 INSERT INTO symbols (file_id, name, kind, line_start, line_end, signature)
                 VALUES (?, ?, ?, ?, ?, ?)
-                "#
+                "#,
             )
             .bind(file_id)
             .bind(&symbol.name)
@@ -302,7 +312,7 @@ impl SqliteStorage {
         if sanitized.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         let symbols = sqlx::query_as::<_, Symbol>(
             r#"
             SELECT s.id, s.file_id, s.name, s.kind, s.line_start, s.line_end, s.signature
@@ -311,7 +321,7 @@ impl SqliteStorage {
                 SELECT rowid FROM symbols_fts WHERE symbols_fts MATCH ?
             )
             LIMIT ?
-            "#
+            "#,
         )
         .bind(&sanitized)
         .bind(limit)
@@ -322,16 +332,26 @@ impl SqliteStorage {
     }
 
     /// Search symbols using FTS5, returning results with file paths
-    pub async fn search_symbols_with_path(&self, query: &str, limit: i32) -> Result<Vec<SymbolWithPath>> {
-        self.search_symbols_with_path_filter(query, limit, None).await
+    pub async fn search_symbols_with_path(
+        &self,
+        query: &str,
+        limit: i32,
+    ) -> Result<Vec<SymbolWithPath>> {
+        self.search_symbols_with_path_filter(query, limit, None)
+            .await
     }
 
-    pub async fn search_symbols_with_path_filter(&self, query: &str, limit: i32, path_filter: Option<&str>) -> Result<Vec<SymbolWithPath>> {
+    pub async fn search_symbols_with_path_filter(
+        &self,
+        query: &str,
+        limit: i32,
+        path_filter: Option<&str>,
+    ) -> Result<Vec<SymbolWithPath>> {
         let sanitized = sanitize_fts5_query(query);
         if sanitized.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         let sql = if let Some(_path_prefix) = path_filter {
             r#"
             SELECT s.id, s.name, s.kind, s.line_start AS line, s.line_end AS end_line,
@@ -356,18 +376,14 @@ impl SqliteStorage {
             LIMIT ?
             "#
         };
-        
-        let mut query_builder = sqlx::query_as::<_, SymbolWithPath>(sql)
-            .bind(&sanitized);
-        
+
+        let mut query_builder = sqlx::query_as::<_, SymbolWithPath>(sql).bind(&sanitized);
+
         if let Some(path_prefix) = path_filter {
             query_builder = query_builder.bind(format!("{}%", path_prefix));
         }
-        
-        let symbols = query_builder
-            .bind(limit)
-            .fetch_all(&self.pool)
-            .await?;
+
+        let symbols = query_builder.bind(limit).fetch_all(&self.pool).await?;
 
         Ok(symbols)
     }
@@ -411,7 +427,7 @@ impl SqliteStorage {
     /// Get file by id
     pub async fn get_file_by_id(&self, id: i64) -> Result<Option<IndexedFile>> {
         let file = sqlx::query_as::<_, IndexedFile>(
-            "SELECT id, path, last_modified, content_hash FROM files WHERE id = ?"
+            "SELECT id, path, last_modified, content_hash FROM files WHERE id = ?",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -421,14 +437,18 @@ impl SqliteStorage {
     }
 
     /// Find symbol by name and file path
-    pub async fn find_symbol_by_name_and_file(&self, name: &str, file_path: &str) -> Result<Option<Symbol>> {
+    pub async fn find_symbol_by_name_and_file(
+        &self,
+        name: &str,
+        file_path: &str,
+    ) -> Result<Option<Symbol>> {
         let symbol = sqlx::query_as::<_, Symbol>(
             r#"
             SELECT s.id, s.file_id, s.name, s.kind, s.line_start, s.line_end, s.signature 
             FROM symbols s
             JOIN files f ON s.file_id = f.id
             WHERE s.name = ? AND f.path = ?
-            "#
+            "#,
         )
         .bind(name)
         .bind(file_path)
@@ -448,7 +468,7 @@ impl SqliteStorage {
             WHERE f.path = ? AND s.line_start <= ? AND s.line_end >= ?
             ORDER BY (s.line_end - s.line_start) ASC
             LIMIT 1
-            "#
+            "#,
         )
         .bind(file_path)
         .bind(line)
@@ -605,7 +625,7 @@ impl SqliteStorage {
                 features = excluded.features,
                 dev_only = excluded.dev_only,
                 updated_at = excluded.updated_at
-            "#
+            "#,
         )
         .bind(&dep.name)
         .bind(&dep.version)
@@ -654,15 +674,13 @@ impl SqliteStorage {
             .await?;
 
         for rule in rules {
-            sqlx::query(
-                "INSERT INTO rules (category, rule, priority, source) VALUES (?, ?, ?, ?)"
-            )
-            .bind(&rule.category)
-            .bind(&rule.rule)
-            .bind(rule.priority)
-            .bind(&rule.source)
-            .execute(&mut *tx)
-            .await?;
+            sqlx::query("INSERT INTO rules (category, rule, priority, source) VALUES (?, ?, ?, ?)")
+                .bind(&rule.category)
+                .bind(&rule.rule)
+                .bind(rule.priority)
+                .bind(&rule.source)
+                .execute(&mut *tx)
+                .await?;
         }
 
         tx.commit().await?;
@@ -681,7 +699,12 @@ impl SqliteStorage {
     }
 
     /// Mark a file as golden sample
-    pub async fn mark_golden_sample(&self, file_id: i64, category: Option<&str>, description: Option<&str>) -> Result<()> {
+    pub async fn mark_golden_sample(
+        &self,
+        file_id: i64,
+        category: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<()> {
         sqlx::query(
             r#"
             INSERT INTO golden_samples (file_id, category, description)
@@ -689,7 +712,7 @@ impl SqliteStorage {
             ON CONFLICT(file_id) DO UPDATE SET
                 category = excluded.category,
                 description = excluded.description
-            "#
+            "#,
         )
         .bind(file_id)
         .bind(category)
@@ -703,7 +726,7 @@ impl SqliteStorage {
     /// Get golden sample file paths
     pub async fn get_golden_samples(&self) -> Result<Vec<(String, Option<String>)>> {
         let samples = sqlx::query_as::<_, (String, Option<String>)>(
-            "SELECT f.path, g.category FROM golden_samples g JOIN files f ON g.file_id = f.id"
+            "SELECT f.path, g.category FROM golden_samples g JOIN files f ON g.file_id = f.id",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -725,13 +748,12 @@ impl SqliteStorage {
         items: Option<&str>,
     ) -> Result<()> {
         // Find or create dependency
-        let dep_id: Option<i64> = sqlx::query_scalar(
-            "SELECT id FROM dependencies WHERE name = ? AND ecosystem = ?"
-        )
-        .bind(dep_name)
-        .bind(ecosystem)
-        .fetch_optional(&self.pool)
-        .await?;
+        let dep_id: Option<i64> =
+            sqlx::query_scalar("SELECT id FROM dependencies WHERE name = ? AND ecosystem = ?")
+                .bind(dep_name)
+                .bind(ecosystem)
+                .fetch_optional(&self.pool)
+                .await?;
 
         let dep_id = match dep_id {
             Some(id) => id,
@@ -805,7 +827,10 @@ impl SqliteStorage {
     }
 
     /// Get impact analysis for a dependency (all files that use it)
-    pub async fn get_dependency_impact(&self, dep_name: &str) -> Result<Vec<(String, i32, String)>> {
+    pub async fn get_dependency_impact(
+        &self,
+        dep_name: &str,
+    ) -> Result<Vec<(String, i32, String)>> {
         let impact = sqlx::query_as::<_, (String, i32, String)>(
             r#"
             SELECT f.path, du.line, du.usage_type
@@ -814,7 +839,7 @@ impl SqliteStorage {
             JOIN files f ON du.file_id = f.id
             WHERE d.name = ?
             ORDER BY f.path, du.line
-            "#
+            "#,
         )
         .bind(dep_name)
         .fetch_all(&self.pool)
@@ -832,7 +857,7 @@ impl SqliteStorage {
             JOIN dependencies d ON du.dependency_id = d.id
             WHERE du.file_id = ?
             ORDER BY du.line
-            "#
+            "#,
         )
         .bind(file_id)
         .fetch_all(&self.pool)
@@ -848,7 +873,7 @@ impl SqliteStorage {
             SELECT d.id, d.name, d.version, d.ecosystem, d.features, d.dev_only, d.updated_at
             FROM dependencies d
             WHERE NOT EXISTS (SELECT 1 FROM dependency_usage du WHERE du.dependency_id = d.id)
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -937,12 +962,14 @@ impl SqliteStorage {
 
     /// Count errors by severity
     pub async fn count_errors(&self) -> Result<(i64, i64)> {
-        let errors: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM active_errors WHERE severity = 'error'")
-            .fetch_one(&self.pool)
-            .await?;
-        let warnings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM active_errors WHERE severity = 'warning'")
-            .fetch_one(&self.pool)
-            .await?;
+        let errors: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM active_errors WHERE severity = 'error'")
+                .fetch_one(&self.pool)
+                .await?;
+        let warnings: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM active_errors WHERE severity = 'warning'")
+                .fetch_one(&self.pool)
+                .await?;
         Ok((errors, warnings))
     }
 
@@ -996,7 +1023,12 @@ impl SqliteStorage {
     // === Vue Tree Operations ===
 
     /// Upsert Vue component tree
-    pub async fn upsert_vue_tree(&self, file_id: i64, tree_text: &str, components: &str) -> Result<()> {
+    pub async fn upsert_vue_tree(
+        &self,
+        file_id: i64,
+        tree_text: &str,
+        components: &str,
+    ) -> Result<()> {
         sqlx::query(
             r#"
             INSERT INTO vue_trees (file_id, tree_text, components, updated_at)
@@ -1005,7 +1037,7 @@ impl SqliteStorage {
                 tree_text = excluded.tree_text,
                 components = excluded.components,
                 updated_at = excluded.updated_at
-            "#
+            "#,
         )
         .bind(file_id)
         .bind(tree_text)
@@ -1025,7 +1057,7 @@ impl SqliteStorage {
             FROM vue_trees vt
             JOIN files f ON vt.file_id = f.id
             WHERE f.path = ?
-            "#
+            "#,
         )
         .bind(file_path)
         .fetch_optional(&self.pool)
@@ -1037,23 +1069,34 @@ impl SqliteStorage {
     // === Domain Operations ===
 
     /// Update file domain
-    pub async fn update_file_domain(&self, file_id: i64, domain: &str, tech_stack: &[String]) -> Result<()> {
+    pub async fn update_file_domain(
+        &self,
+        file_id: i64,
+        domain: &str,
+        tech_stack: &[String],
+    ) -> Result<()> {
         // Serialize with rkyv for BLOB column
         let tech_vec = tech_stack.to_vec();
-        let tech_blob = rkyv::to_bytes::<_, 256>(&tech_vec)
-            .map_err(|e| StorageError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-        
+        let tech_blob = rkyv::to_bytes::<_, 256>(&tech_vec).map_err(|e| {
+            StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            ))
+        })?;
+
         // Also keep JSON for backward compatibility during migration
         let tech_json = serde_json::to_string(tech_stack).unwrap_or_default();
-        
-        sqlx::query("UPDATE files SET domain = ?, tech_stack = ?, tech_stack_blob = ? WHERE id = ?")
-            .bind(domain)
-            .bind(&tech_json)
-            .bind(tech_blob.as_slice())
-            .bind(file_id)
-            .execute(&self.pool)
-            .await?;
-        
+
+        sqlx::query(
+            "UPDATE files SET domain = ?, tech_stack = ?, tech_stack_blob = ? WHERE id = ?",
+        )
+        .bind(domain)
+        .bind(&tech_json)
+        .bind(tech_blob.as_slice())
+        .bind(file_id)
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -1068,12 +1111,16 @@ impl SqliteStorage {
     ) -> Result<()> {
         // Serialize with rkyv for BLOB column
         let fields_vec = matched_fields.to_vec();
-        let fields_blob = rkyv::to_bytes::<_, 256>(&fields_vec)
-            .map_err(|e| StorageError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-        
+        let fields_blob = rkyv::to_bytes::<_, 256>(&fields_vec).map_err(|e| {
+            StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            ))
+        })?;
+
         // Also keep JSON for backward compatibility
         let fields_json = serde_json::to_string(matched_fields).unwrap_or_default();
-        
+
         sqlx::query(
             r#"
             INSERT INTO entity_links (backend_symbol_id, frontend_symbol_id, confidence, link_type, matched_fields, matched_fields_blob)
@@ -1093,12 +1140,18 @@ impl SqliteStorage {
         .bind(fields_blob.as_slice())
         .execute(&self.pool)
         .await?;
-        
+
         Ok(())
     }
 
     /// Insert API endpoint
-    pub async fn insert_api_endpoint(&self, method: &str, path: &str, file_id: i64, line: i32) -> Result<()> {
+    pub async fn insert_api_endpoint(
+        &self,
+        method: &str,
+        path: &str,
+        file_id: i64,
+        line: i32,
+    ) -> Result<()> {
         sqlx::query(
             r#"
             INSERT INTO api_endpoints (method, path, file_id, line)
@@ -1106,7 +1159,7 @@ impl SqliteStorage {
             ON CONFLICT(method, path) DO UPDATE SET
                 file_id = excluded.file_id,
                 line = excluded.line
-            "#
+            "#,
         )
         .bind(method)
         .bind(path)
@@ -1114,12 +1167,19 @@ impl SqliteStorage {
         .bind(line)
         .execute(&self.pool)
         .await?;
-        
+
         Ok(())
     }
 
     /// Insert frontend API call
-    pub async fn insert_frontend_api_call(&self, method: Option<&str>, path: &str, path_pattern: &str, file_id: i64, line: i32) -> Result<()> {
+    pub async fn insert_frontend_api_call(
+        &self,
+        method: Option<&str>,
+        path: &str,
+        path_pattern: &str,
+        file_id: i64,
+        line: i32,
+    ) -> Result<()> {
         sqlx::query(
             "INSERT INTO frontend_api_calls (method, path, path_pattern, file_id, line) VALUES (?, ?, ?, ?, ?)"
         )
@@ -1130,12 +1190,15 @@ impl SqliteStorage {
         .bind(line)
         .execute(&self.pool)
         .await?;
-        
+
         Ok(())
     }
 
     /// Get linked frontend symbol for a backend symbol
-    pub async fn get_frontend_links(&self, backend_symbol_id: i64) -> Result<Vec<(i64, String, f64)>> {
+    pub async fn get_frontend_links(
+        &self,
+        backend_symbol_id: i64,
+    ) -> Result<Vec<(i64, String, f64)>> {
         let links = sqlx::query_as::<_, (i64, String, f64)>(
             r#"
             SELECT el.frontend_symbol_id, s.name, el.confidence
@@ -1143,17 +1206,20 @@ impl SqliteStorage {
             JOIN symbols s ON el.frontend_symbol_id = s.id
             WHERE el.backend_symbol_id = ?
             ORDER BY el.confidence DESC
-            "#
+            "#,
         )
         .bind(backend_symbol_id)
         .fetch_all(&self.pool)
         .await?;
-        
+
         Ok(links)
     }
 
     /// Get linked backend symbol for a frontend symbol
-    pub async fn get_backend_links(&self, frontend_symbol_id: i64) -> Result<Vec<(i64, String, f64)>> {
+    pub async fn get_backend_links(
+        &self,
+        frontend_symbol_id: i64,
+    ) -> Result<Vec<(i64, String, f64)>> {
         let links = sqlx::query_as::<_, (i64, String, f64)>(
             r#"
             SELECT el.backend_symbol_id, s.name, el.confidence
@@ -1161,26 +1227,32 @@ impl SqliteStorage {
             JOIN symbols s ON el.backend_symbol_id = s.id
             WHERE el.frontend_symbol_id = ?
             ORDER BY el.confidence DESC
-            "#
+            "#,
         )
         .bind(frontend_symbol_id)
         .fetch_all(&self.pool)
         .await?;
-        
+
         Ok(links)
     }
 
     // === MCP Tool Support Methods ===
 
     /// Get symbols with optional filters
-    pub async fn get_symbols(&self, file: Option<&str>, kind: Option<&str>, offset: u32, limit: u32) -> Result<Vec<SymbolWithPath>> {
+    pub async fn get_symbols(
+        &self,
+        file: Option<&str>,
+        kind: Option<&str>,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<SymbolWithPath>> {
         let mut query = String::from(
             r#"
             SELECT s.id, s.name, s.kind, s.line_start as line, s.line_end as end_line, s.signature, f.path as file_path
             FROM symbols s
             JOIN files f ON s.file_id = f.id
             WHERE 1=1
-            "#
+            "#,
         );
 
         if file.is_some() {
@@ -1192,7 +1264,7 @@ impl SqliteStorage {
         query.push_str(" ORDER BY f.path, s.line_start LIMIT ? OFFSET ?");
 
         let mut q = sqlx::query_as::<_, SymbolWithPath>(&query);
-        
+
         if let Some(f) = file {
             q = q.bind(f);
         }
@@ -1205,7 +1277,10 @@ impl SqliteStorage {
     }
 
     /// Get references by symbol name
-    pub async fn get_references_by_name(&self, symbol_name: &str) -> Result<Vec<ReferenceWithPath>> {
+    pub async fn get_references_by_name(
+        &self,
+        symbol_name: &str,
+    ) -> Result<Vec<ReferenceWithPath>> {
         let refs = sqlx::query_as::<_, ReferenceWithPath>(
             r#"
             SELECT sr.id, sr.target_name, sr.kind as ref_kind, sr.line, f.path as file_path
@@ -1214,7 +1289,7 @@ impl SqliteStorage {
             JOIN files f ON s.file_id = f.id
             WHERE sr.target_name = ?
             ORDER BY f.path, sr.line
-            "#
+            "#,
         )
         .bind(symbol_name)
         .fetch_all(&self.pool)
@@ -1224,7 +1299,10 @@ impl SqliteStorage {
     }
 
     /// Get dependencies with optional ecosystem filter
-    pub async fn get_dependencies_filtered(&self, ecosystem: Option<&str>) -> Result<Vec<Dependency>> {
+    pub async fn get_dependencies_filtered(
+        &self,
+        ecosystem: Option<&str>,
+    ) -> Result<Vec<Dependency>> {
         if let Some(eco) = ecosystem {
             self.get_dependencies_by_ecosystem(eco).await
         } else {
@@ -1242,7 +1320,7 @@ impl SqliteStorage {
             JOIN files f ON du.file_id = f.id
             WHERE d.name = ?
             ORDER BY f.path, du.line
-            "#
+            "#,
         )
         .bind(dep_name)
         .fetch_all(&self.pool)
@@ -1252,7 +1330,13 @@ impl SqliteStorage {
     }
 
     /// Get errors with optional filters
-    pub async fn get_errors(&self, file: Option<&str>, severity: Option<&str>, offset: u32, limit: u32) -> Result<Vec<ActiveError>> {
+    pub async fn get_errors(
+        &self,
+        file: Option<&str>,
+        severity: Option<&str>,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<ActiveError>> {
         let mut query = String::from(
             "SELECT id, file_path, line, column, severity, code, message, suggestion, updated_at FROM active_errors WHERE 1=1"
         );
@@ -1286,7 +1370,7 @@ impl SqliteStorage {
             FROM files
             GROUP BY domain
             ORDER BY count DESC
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -1301,7 +1385,7 @@ impl SqliteStorage {
             SELECT id, method, path, file_id, line
             FROM api_endpoints
             ORDER BY path, method
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -1316,7 +1400,7 @@ impl SqliteStorage {
             SELECT id, method, path, path_pattern, file_id, line
             FROM frontend_api_calls
             ORDER BY path
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -1336,7 +1420,7 @@ impl SqliteStorage {
         confidence: Option<f64>,
     ) -> Result<()> {
         let now = chrono::Utc::now().timestamp();
-        
+
         sqlx::query(
             r#"
             INSERT INTO file_summaries (file_id, summary, summary_source, model_name, confidence, created_at, updated_at)
@@ -1364,25 +1448,27 @@ impl SqliteStorage {
 
     /// Get summary for a file
     pub async fn get_summary(&self, file_id: i64) -> Result<Option<FileSummary>> {
-        let summary = sqlx::query_as::<_, FileSummary>(
-            "SELECT * FROM file_summaries WHERE file_id = ?"
-        )
-        .bind(file_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let summary =
+            sqlx::query_as::<_, FileSummary>("SELECT * FROM file_summaries WHERE file_id = ?")
+                .bind(file_id)
+                .fetch_optional(&self.pool)
+                .await?;
 
         Ok(summary)
     }
 
     /// Get summary by file path
-    pub async fn get_summary_by_path(&self, file_path: &str) -> Result<Option<FileSummaryWithPath>> {
+    pub async fn get_summary_by_path(
+        &self,
+        file_path: &str,
+    ) -> Result<Option<FileSummaryWithPath>> {
         let summary = sqlx::query_as::<_, FileSummaryWithPath>(
             r#"
             SELECT fs.id, f.path as file_path, fs.summary, fs.summary_source
             FROM file_summaries fs
             JOIN files f ON fs.file_id = f.id
             WHERE f.path = ?
-            "#
+            "#,
         )
         .bind(file_path)
         .fetch_optional(&self.pool)
@@ -1399,7 +1485,7 @@ impl SqliteStorage {
             FROM file_summaries fs
             JOIN files f ON fs.file_id = f.id
             ORDER BY f.path
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -1410,13 +1496,13 @@ impl SqliteStorage {
     /// Add file to summary queue
     pub async fn queue_for_summary(&self, file_id: i64, priority: i32) -> Result<()> {
         let now = chrono::Utc::now().timestamp();
-        
+
         sqlx::query(
             r#"
             INSERT INTO summary_queue (file_id, priority, status, created_at)
             VALUES (?, ?, 'pending', ?)
             ON CONFLICT(file_id, status) DO UPDATE SET priority = MAX(priority, excluded.priority)
-            "#
+            "#,
         )
         .bind(file_id)
         .bind(priority)
@@ -1439,7 +1525,7 @@ impl SqliteStorage {
             WHERE status = 'pending'
             ORDER BY priority DESC, created_at ASC
             LIMIT 1
-            "#
+            "#,
         )
         .fetch_optional(&mut *tx)
         .await?;
@@ -1477,24 +1563,28 @@ impl SqliteStorage {
 
     /// Recover stuck items: reset 'processing' → 'pending' (call on startup).
     pub async fn recover_summary_queue(&self) -> Result<u64> {
-        let result = sqlx::query("UPDATE summary_queue SET status = 'pending' WHERE status = 'processing'")
-            .execute(&self.pool)
-            .await?;
+        let result =
+            sqlx::query("UPDATE summary_queue SET status = 'pending' WHERE status = 'processing'")
+                .execute(&self.pool)
+                .await?;
         Ok(result.rows_affected())
     }
 
     /// Get queue stats
     pub async fn get_summary_queue_stats(&self) -> Result<(i64, i64, i64)> {
-        let pending: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM summary_queue WHERE status = 'pending'")
-            .fetch_one(&self.pool)
-            .await?;
-        let processing: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM summary_queue WHERE status = 'processing'")
-            .fetch_one(&self.pool)
-            .await?;
-        let failed: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM summary_queue WHERE status = 'failed'")
-            .fetch_one(&self.pool)
-            .await?;
-        
+        let pending: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM summary_queue WHERE status = 'pending'")
+                .fetch_one(&self.pool)
+                .await?;
+        let processing: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM summary_queue WHERE status = 'processing'")
+                .fetch_one(&self.pool)
+                .await?;
+        let failed: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM summary_queue WHERE status = 'failed'")
+                .fetch_one(&self.pool)
+                .await?;
+
         Ok((pending.0, processing.0, failed.0))
     }
 
@@ -1537,7 +1627,10 @@ impl SqliteStorage {
     }
 
     /// Получить все fingerprints для языка
-    pub async fn get_fingerprints_by_language(&self, language: &str) -> Result<Vec<TypeFingerprint>> {
+    pub async fn get_fingerprints_by_language(
+        &self,
+        language: &str,
+    ) -> Result<Vec<TypeFingerprint>> {
         let fps = sqlx::query_as::<_, TypeFingerprint>(
             r#"
             SELECT tf.id, tf.file_id, tf.symbol_id, tf.type_name, tf.language,
@@ -1547,7 +1640,7 @@ impl SqliteStorage {
             JOIN files f ON tf.file_id = f.id
             WHERE tf.language = ? AND tf.field_count >= 3
             ORDER BY tf.type_name
-            "#
+            "#,
         )
         .bind(language)
         .fetch_all(&self.pool)
@@ -1580,9 +1673,13 @@ impl SqliteStorage {
     ) -> Result<()> {
         // Serialize metadata with rkyv for BLOB column
         let metadata_string = metadata.to_string();
-        let metadata_blob = rkyv::to_bytes::<_, 256>(&metadata_string)
-            .map_err(|e| StorageError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-        
+        let metadata_blob = rkyv::to_bytes::<_, 256>(&metadata_string).map_err(|e| {
+            StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            ))
+        })?;
+
         sqlx::query(
             r#"
             INSERT INTO cross_stack_links (source_file, target_file, source_symbol, target_symbol, link_type, weight, metadata, metadata_blob)
@@ -1611,7 +1708,10 @@ impl SqliteStorage {
     }
 
     /// Получить все cross-stack связи для файла
-    pub async fn get_cross_stack_links_for_file(&self, file_path: &str) -> Result<Vec<CrossStackLink>> {
+    pub async fn get_cross_stack_links_for_file(
+        &self,
+        file_path: &str,
+    ) -> Result<Vec<CrossStackLink>> {
         let links = sqlx::query_as::<_, CrossStackLink>(
             r#"
             SELECT id, source_file, target_file, source_symbol, target_symbol, link_type, weight, 
@@ -1619,7 +1719,7 @@ impl SqliteStorage {
             FROM cross_stack_links
             WHERE source_file = ? OR target_file = ?
             ORDER BY weight DESC
-            "#
+            "#,
         )
         .bind(file_path)
         .bind(file_path)
@@ -1630,7 +1730,10 @@ impl SqliteStorage {
     }
 
     /// Получить все cross-stack связи определённого типа
-    pub async fn get_cross_stack_links_by_type(&self, link_type: &str) -> Result<Vec<CrossStackLink>> {
+    pub async fn get_cross_stack_links_by_type(
+        &self,
+        link_type: &str,
+    ) -> Result<Vec<CrossStackLink>> {
         let links = sqlx::query_as::<_, CrossStackLink>(
             r#"
             SELECT id, source_file, target_file, source_symbol, target_symbol, link_type, weight, 
@@ -1638,7 +1741,7 @@ impl SqliteStorage {
             FROM cross_stack_links
             WHERE link_type = ?
             ORDER BY weight DESC
-            "#
+            "#,
         )
         .bind(link_type)
         .fetch_all(&self.pool)
@@ -1721,12 +1824,10 @@ impl SqliteStorage {
 
     /// Get a metadata value by key.
     pub async fn get_index_meta(&self, key: &str) -> Result<Option<String>> {
-        let row = sqlx::query_scalar::<_, String>(
-            "SELECT value FROM index_metadata WHERE key = ?",
-        )
-        .bind(key)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = sqlx::query_scalar::<_, String>("SELECT value FROM index_metadata WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(row)
     }
 
@@ -1795,10 +1896,7 @@ impl SqliteStorage {
 
     /// Store embeddings in the chunk cache.
     /// Now uses rkyv for better performance
-    pub async fn store_cached_embeddings(
-        &self,
-        entries: &[(String, Vec<f32>)],
-    ) -> Result<()> {
+    pub async fn store_cached_embeddings(&self, entries: &[(String, Vec<f32>)]) -> Result<()> {
         if entries.is_empty() {
             return Ok(());
         }
@@ -1806,9 +1904,13 @@ impl SqliteStorage {
             let mut tx = self.pool.begin().await?;
             for (hash, embedding) in chunk {
                 // Serialize with rkyv for zero-copy reads
-                let blob = rkyv::to_bytes::<_, 256>(embedding)
-                    .map_err(|e| StorageError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-                
+                let blob = rkyv::to_bytes::<_, 256>(embedding).map_err(|e| {
+                    StorageError::Io(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_string(),
+                    ))
+                })?;
+
                 sqlx::query(
                     "INSERT OR REPLACE INTO chunk_cache (content_hash, embedding) VALUES (?, ?)",
                 )
@@ -1828,10 +1930,10 @@ impl SqliteStorage {
         let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM chunk_cache")
             .fetch_one(&self.pool)
             .await?;
-        
+
         // Approximate size: each entry ≈ 64 bytes hash + 1536 bytes embedding (384 * 4)
         let size_estimate = count.0 * (64 + 1536);
-        
+
         Ok((count.0, size_estimate))
     }
 
@@ -1839,13 +1941,13 @@ impl SqliteStorage {
     /// Uses LRU based on created_at timestamp.
     pub async fn evict_chunk_cache_to_limit(&self, max_entries: i64) -> Result<i64> {
         let (current_count, _) = self.get_chunk_cache_stats().await?;
-        
+
         if current_count <= max_entries {
             return Ok(0);
         }
-        
+
         let to_delete = current_count - max_entries;
-        
+
         // Delete oldest entries (smallest created_at)
         let result = sqlx::query(
             r#"
@@ -1855,34 +1957,42 @@ impl SqliteStorage {
                 ORDER BY created_at ASC 
                 LIMIT ?
             )
-            "#
+            "#,
         )
         .bind(to_delete)
         .execute(&self.pool)
         .await?;
-        
+
         let deleted = result.rows_affected() as i64;
         if deleted > 0 {
-            tracing::info!("Cache eviction: removed {} old entries (limit: {})", deleted, max_entries);
+            tracing::info!(
+                "Cache eviction: removed {} old entries (limit: {})",
+                deleted,
+                max_entries
+            );
         }
-        
+
         Ok(deleted)
     }
 
     /// Evict cache entries older than specified days.
     pub async fn evict_chunk_cache_by_age(&self, max_age_days: i64) -> Result<i64> {
         let cutoff = chrono::Utc::now().timestamp() - (max_age_days * 24 * 60 * 60);
-        
+
         let result = sqlx::query("DELETE FROM chunk_cache WHERE created_at < ?")
             .bind(cutoff)
             .execute(&self.pool)
             .await?;
-        
+
         let deleted = result.rows_affected() as i64;
         if deleted > 0 {
-            tracing::info!("Cache eviction: removed {} entries older than {} days", deleted, max_age_days);
+            tracing::info!(
+                "Cache eviction: removed {} entries older than {} days",
+                deleted,
+                max_age_days
+            );
         }
-        
+
         Ok(deleted)
     }
 }
@@ -1955,11 +2065,11 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("migration_test.db");
         let storage = SqliteStorage::new(db_path.to_str().unwrap()).await.unwrap();
-        
+
         // Migration should succeed
         let result = storage.migrate().await;
         assert!(result.is_ok());
-        
+
         // Second migration should be idempotent
         let result = storage.migrate().await;
         assert!(result.is_ok());
@@ -1972,11 +2082,14 @@ mod tests {
     #[tokio::test]
     async fn test_upsert_and_get_file() {
         let (storage, _temp) = create_test_storage().await;
-        
+
         // Insert a file
-        let file_id = storage.upsert_file("/test/file.rs", 12345, "abc123hash").await.unwrap();
+        let file_id = storage
+            .upsert_file("/test/file.rs", 12345, "abc123hash")
+            .await
+            .unwrap();
         assert!(file_id > 0);
-        
+
         // Get the file back
         let file = storage.get_file("/test/file.rs").await.unwrap();
         assert!(file.is_some());
@@ -1989,16 +2102,22 @@ mod tests {
     #[tokio::test]
     async fn test_upsert_updates_existing() {
         let (storage, _temp) = create_test_storage().await;
-        
+
         // Insert first version
-        let id1 = storage.upsert_file("/test/file.rs", 100, "hash1").await.unwrap();
-        
+        let id1 = storage
+            .upsert_file("/test/file.rs", 100, "hash1")
+            .await
+            .unwrap();
+
         // Update with new hash
-        let id2 = storage.upsert_file("/test/file.rs", 200, "hash2").await.unwrap();
-        
+        let id2 = storage
+            .upsert_file("/test/file.rs", 200, "hash2")
+            .await
+            .unwrap();
+
         // Should return same ID
         assert_eq!(id1, id2);
-        
+
         // File should be updated
         let file = storage.get_file("/test/file.rs").await.unwrap().unwrap();
         assert_eq!(file.last_modified, 200);
@@ -2008,26 +2127,37 @@ mod tests {
     #[tokio::test]
     async fn test_delete_file() {
         let (storage, _temp) = create_test_storage().await;
-        
-        storage.upsert_file("/test/to_delete.rs", 100, "hash").await.unwrap();
-        assert!(storage.get_file("/test/to_delete.rs").await.unwrap().is_some());
-        
+
+        storage
+            .upsert_file("/test/to_delete.rs", 100, "hash")
+            .await
+            .unwrap();
+        assert!(storage
+            .get_file("/test/to_delete.rs")
+            .await
+            .unwrap()
+            .is_some());
+
         storage.delete_file("/test/to_delete.rs").await.unwrap();
-        assert!(storage.get_file("/test/to_delete.rs").await.unwrap().is_none());
+        assert!(storage
+            .get_file("/test/to_delete.rs")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
     async fn test_get_file_count() {
         let (storage, _temp) = create_test_storage().await;
-        
+
         assert_eq!(storage.get_file_count().await.unwrap(), 0);
-        
+
         storage.upsert_file("/file1.rs", 100, "h1").await.unwrap();
         assert_eq!(storage.get_file_count().await.unwrap(), 1);
-        
+
         storage.upsert_file("/file2.rs", 100, "h2").await.unwrap();
         assert_eq!(storage.get_file_count().await.unwrap(), 2);
-        
+
         storage.delete_file("/file1.rs").await.unwrap();
         assert_eq!(storage.get_file_count().await.unwrap(), 1);
     }
@@ -2039,9 +2169,9 @@ mod tests {
     #[tokio::test]
     async fn test_insert_and_get_symbols() {
         let (storage, _temp) = create_test_storage().await;
-        
+
         let file_id = storage.upsert_file("/test.rs", 100, "hash").await.unwrap();
-        
+
         let symbols = vec![
             Symbol {
                 id: 0,
@@ -2062,9 +2192,9 @@ mod tests {
                 signature: Some("struct MyStruct".to_string()),
             },
         ];
-        
+
         storage.insert_symbols(file_id, &symbols).await.unwrap();
-        
+
         let retrieved = storage.get_file_symbols(file_id).await.unwrap();
         assert_eq!(retrieved.len(), 2);
         assert!(retrieved.iter().any(|s| s.name == "my_function"));
@@ -2074,7 +2204,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_symbol_by_name() {
         let (storage, _temp) = create_test_storage().await;
-        
+
         let file_id = storage.upsert_file("/test.rs", 100, "hash").await.unwrap();
         let symbols = vec![Symbol {
             id: 0,
@@ -2086,11 +2216,11 @@ mod tests {
             signature: None,
         }];
         storage.insert_symbols(file_id, &symbols).await.unwrap();
-        
+
         let found = storage.get_symbol_by_name("unique_symbol").await.unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].name, "unique_symbol");
-        
+
         let not_found = storage.get_symbol_by_name("nonexistent").await.unwrap();
         assert!(not_found.is_empty());
     }
@@ -2098,9 +2228,9 @@ mod tests {
     #[tokio::test]
     async fn test_get_symbols_pagination() {
         let (storage, _temp) = create_test_storage().await;
-        
+
         let file_id = storage.upsert_file("/test.rs", 100, "hash").await.unwrap();
-        
+
         // Insert 10 symbols
         let mut symbols = vec![];
         for i in 0..10 {
@@ -2115,14 +2245,14 @@ mod tests {
             });
         }
         storage.insert_symbols(file_id, &symbols).await.unwrap();
-        
+
         // Test pagination
         let page1 = storage.get_symbols(None, None, 0, 5).await.unwrap();
         assert_eq!(page1.len(), 5);
-        
+
         let page2 = storage.get_symbols(None, None, 5, 5).await.unwrap();
         assert_eq!(page2.len(), 5);
-        
+
         // Different names between pages
         let names1: Vec<_> = page1.iter().map(|s| &s.name).collect();
         let names2: Vec<_> = page2.iter().map(|s| &s.name).collect();
@@ -2138,23 +2268,30 @@ mod tests {
     #[tokio::test]
     async fn test_embedding_cache() {
         let (storage, _temp) = create_test_storage().await;
-        
+
         let entries = vec![
             ("hash1".to_string(), vec![0.1f32, 0.2, 0.3]),
             ("hash2".to_string(), vec![0.4f32, 0.5, 0.6]),
         ];
-        
+
         // Store embeddings
         storage.store_cached_embeddings(&entries).await.unwrap();
-        
+
         // Retrieve
-        let cached = storage.get_cached_embeddings(&["hash1".to_string(), "hash2".to_string(), "hash3".to_string()]).await.unwrap();
-        
+        let cached = storage
+            .get_cached_embeddings(&[
+                "hash1".to_string(),
+                "hash2".to_string(),
+                "hash3".to_string(),
+            ])
+            .await
+            .unwrap();
+
         assert_eq!(cached.len(), 2);
         assert!(cached.contains_key("hash1"));
         assert!(cached.contains_key("hash2"));
         assert!(!cached.contains_key("hash3")); // not stored
-        
+
         // Verify values
         let emb1 = cached.get("hash1").unwrap();
         assert_eq!(emb1.len(), 3);
@@ -2164,16 +2301,22 @@ mod tests {
     #[tokio::test]
     async fn test_clear_chunk_cache() {
         let (storage, _temp) = create_test_storage().await;
-        
+
         let entries = vec![("hash1".to_string(), vec![0.1f32])];
         storage.store_cached_embeddings(&entries).await.unwrap();
-        
-        let cached = storage.get_cached_embeddings(&["hash1".to_string()]).await.unwrap();
+
+        let cached = storage
+            .get_cached_embeddings(&["hash1".to_string()])
+            .await
+            .unwrap();
         assert_eq!(cached.len(), 1);
-        
+
         storage.clear_chunk_cache().await.unwrap();
-        
-        let cached = storage.get_cached_embeddings(&["hash1".to_string()]).await.unwrap();
+
+        let cached = storage
+            .get_cached_embeddings(&["hash1".to_string()])
+            .await
+            .unwrap();
         assert_eq!(cached.len(), 0);
     }
 
@@ -2184,20 +2327,26 @@ mod tests {
     #[tokio::test]
     async fn test_index_meta() {
         let (storage, _temp) = create_test_storage().await;
-        
+
         // Initially empty
         let value = storage.get_index_meta("test_key").await.unwrap();
         assert!(value.is_none());
-        
+
         // Set value
-        storage.set_index_meta("test_key", "test_value").await.unwrap();
-        
+        storage
+            .set_index_meta("test_key", "test_value")
+            .await
+            .unwrap();
+
         // Get value
         let value = storage.get_index_meta("test_key").await.unwrap();
         assert_eq!(value, Some("test_value".to_string()));
-        
+
         // Update value
-        storage.set_index_meta("test_key", "new_value").await.unwrap();
+        storage
+            .set_index_meta("test_key", "new_value")
+            .await
+            .unwrap();
         let value = storage.get_index_meta("test_key").await.unwrap();
         assert_eq!(value, Some("new_value".to_string()));
     }
@@ -2209,7 +2358,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_rules() {
         let (storage, _temp) = create_test_storage().await;
-        
+
         // Get rules (may be empty initially)
         let rules = storage.get_rules().await.unwrap();
         // Just verify no error - rules may or may not exist
@@ -2223,11 +2372,11 @@ mod tests {
     #[tokio::test]
     async fn test_get_active_errors() {
         let (storage, _temp) = create_test_storage().await;
-        
+
         // Get errors (may be empty initially)
         let errors = storage.get_active_errors().await.unwrap();
         assert!(errors.is_empty());
-        
+
         // Clear errors should work even if empty
         storage.clear_active_errors().await.unwrap();
     }
@@ -2239,7 +2388,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_golden_samples() {
         let (storage, _temp) = create_test_storage().await;
-        
+
         // Get samples (may be empty initially)
         let samples = storage.get_golden_samples().await.unwrap();
         assert!(samples.is_empty());
@@ -2252,10 +2401,16 @@ mod tests {
     #[tokio::test]
     async fn test_audit_log() {
         let (storage, _temp) = create_test_storage().await;
-        
-        storage.log_tool_call("search", Some(r#"{"query":"test"}"#), 150, true, None).await.unwrap();
-        storage.log_tool_call("get_symbols", None, 50, false, Some("error occurred")).await.unwrap();
-        
+
+        storage
+            .log_tool_call("search", Some(r#"{"query":"test"}"#), 150, true, None)
+            .await
+            .unwrap();
+        storage
+            .log_tool_call("get_symbols", None, 50, false, Some("error occurred"))
+            .await
+            .unwrap();
+
         // Just verify no errors - audit log reading would need additional method
     }
 }

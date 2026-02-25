@@ -56,11 +56,9 @@ pub async fn tool_execute_code(args: Value, ctx: &ToolContext) -> Result<Value> 
         "python" => execute_python_code(code, timeout_seconds).await?,
         "javascript" | "js" => execute_javascript_code(code, timeout_seconds).await?,
         _ => {
-            return Err(goferError::InvalidParams(format!(
-                "Unsupported language: {}",
-                language
-            ))
-            .into())
+            return Err(
+                goferError::InvalidParams(format!("Unsupported language: {}", language)).into(),
+            )
         }
     };
 
@@ -97,26 +95,31 @@ pub async fn tool_execute_function(args: Value, ctx: &ToolContext) -> Result<Val
         return Err(goferError::InvalidParams(format!("File not found: {}", path)).into());
     }
 
-    let ext = abs_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = abs_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     let result = match ext {
         "rs" => {
-            execute_rust_function(&abs_path, function_name, &function_args, timeout_seconds, &ctx.root_path)
+            execute_rust_function(
+                &abs_path,
+                function_name,
+                &function_args,
+                timeout_seconds,
+                &ctx.root_path,
+            )
+            .await?
+        }
+        "py" => {
+            execute_python_function(&abs_path, function_name, &function_args, timeout_seconds)
                 .await?
         }
-        "py" => execute_python_function(&abs_path, function_name, &function_args, timeout_seconds).await?,
         "js" | "ts" => {
-            execute_javascript_function(&abs_path, function_name, &function_args, timeout_seconds).await?
+            execute_javascript_function(&abs_path, function_name, &function_args, timeout_seconds)
+                .await?
         }
         _ => {
-            return Err(goferError::InvalidParams(format!(
-                "Unsupported file extension: {}",
-                ext
-            ))
-            .into())
+            return Err(
+                goferError::InvalidParams(format!("Unsupported file extension: {}", ext)).into(),
+            )
         }
     };
 
@@ -144,21 +147,16 @@ pub async fn tool_run_test(args: Value, ctx: &ToolContext) -> Result<Value> {
         return Err(goferError::InvalidParams(format!("File not found: {}", path)).into());
     }
 
-    let ext = abs_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = abs_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     let result = match ext {
         "rs" => run_rust_test(&ctx.root_path, test_name, timeout_seconds).await?,
         "py" => run_python_test(&abs_path, test_name, timeout_seconds).await?,
         "js" | "ts" => run_javascript_test(&abs_path, test_name, timeout_seconds).await?,
         _ => {
-            return Err(goferError::InvalidParams(format!(
-                "Unsupported file extension: {}",
-                ext
-            ))
-            .into())
+            return Err(
+                goferError::InvalidParams(format!("Unsupported file extension: {}", ext)).into(),
+            )
         }
     };
 
@@ -201,7 +199,11 @@ pub async fn tool_run_all_tests(args: Value, ctx: &ToolContext) -> Result<Value>
 
 // Rust execution implementations
 
-async fn execute_rust_code(code: &str, timeout_secs: u64, _project_root: &Path) -> Result<ExecutionResult> {
+async fn execute_rust_code(
+    code: &str,
+    timeout_secs: u64,
+    _project_root: &Path,
+) -> Result<ExecutionResult> {
     let start = std::time::Instant::now();
 
     // Create temporary file
@@ -571,7 +573,10 @@ async fn run_python_test(path: &Path, test_name: Option<&str>, timeout_secs: u64
     let start = std::time::Instant::now();
 
     let mut cmd = Command::new("pytest");
-    cmd.arg(path).arg("-v").stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.arg(path)
+        .arg("-v")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     if let Some(name) = test_name {
         cmd.arg("-k").arg(name);
@@ -619,7 +624,10 @@ async fn run_javascript_test(
 
     // Try Jest first
     let mut cmd = Command::new("npx");
-    cmd.arg("jest").arg(path).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.arg("jest")
+        .arg(path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     if let Some(name) = test_name {
         cmd.arg("-t").arg(name);
@@ -658,7 +666,11 @@ async fn run_javascript_test(
     }))
 }
 
-async fn run_cargo_tests(project_root: &Path, filter: Option<&str>, timeout_secs: u64) -> Result<Value> {
+async fn run_cargo_tests(
+    project_root: &Path,
+    filter: Option<&str>,
+    timeout_secs: u64,
+) -> Result<Value> {
     let mut cmd = Command::new("cargo");
     cmd.arg("test")
         .current_dir(project_root)
@@ -696,7 +708,11 @@ async fn run_cargo_tests(project_root: &Path, filter: Option<&str>, timeout_secs
     }))
 }
 
-async fn run_npm_tests(project_root: &Path, filter: Option<&str>, timeout_secs: u64) -> Result<Value> {
+async fn run_npm_tests(
+    project_root: &Path,
+    filter: Option<&str>,
+    timeout_secs: u64,
+) -> Result<Value> {
     let mut cmd = Command::new("npm");
     cmd.arg("test")
         .current_dir(project_root)
@@ -734,7 +750,11 @@ async fn run_npm_tests(project_root: &Path, filter: Option<&str>, timeout_secs: 
     }))
 }
 
-async fn run_pytest_tests(project_root: &Path, filter: Option<&str>, timeout_secs: u64) -> Result<Value> {
+async fn run_pytest_tests(
+    project_root: &Path,
+    filter: Option<&str>,
+    timeout_secs: u64,
+) -> Result<Value> {
     let mut cmd = Command::new("pytest");
     cmd.arg("-v")
         .current_dir(project_root)

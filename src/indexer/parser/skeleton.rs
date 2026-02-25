@@ -1,7 +1,7 @@
 use regex::Regex;
 use tree_sitter::{Node, Parser};
 
-use super::core::{SupportedLanguage, ParserError, Result};
+use super::core::{ParserError, Result, SupportedLanguage};
 
 // === Code Skeletonization ===
 
@@ -76,11 +76,7 @@ fn collect_body_ranges(
 }
 
 /// Rust: заменяем block-тела function_item и fn внутри impl
-fn collect_rust_bodies(
-    node: Node<'_>,
-    _code: &str,
-    replacements: &mut Vec<(usize, usize, &str)>,
-) {
+fn collect_rust_bodies(node: Node<'_>, _code: &str, replacements: &mut Vec<(usize, usize, &str)>) {
     let kind = node.kind();
 
     match kind {
@@ -88,11 +84,7 @@ fn collect_rust_bodies(
             // Ищем дочерний узел типа "block" — это тело функции
             if let Some(body) = node.child_by_field_name("body") {
                 if body.kind() == "block" {
-                    replacements.push((
-                        body.start_byte(),
-                        body.end_byte(),
-                        "{ /* ... */ }",
-                    ));
+                    replacements.push((body.start_byte(), body.end_byte(), "{ /* ... */ }"));
                     return; // не рекурсируем внутрь тела
                 }
             }
@@ -127,22 +119,14 @@ fn collect_rust_bodies(
 }
 
 /// TypeScript/JavaScript: заменяем statement_block в function/method/arrow
-fn collect_ts_bodies(
-    node: Node<'_>,
-    _code: &str,
-    replacements: &mut Vec<(usize, usize, &str)>,
-) {
+fn collect_ts_bodies(node: Node<'_>, _code: &str, replacements: &mut Vec<(usize, usize, &str)>) {
     let kind = node.kind();
 
     match kind {
         "function_declaration" | "method_definition" | "function" => {
             if let Some(body) = node.child_by_field_name("body") {
                 if body.kind() == "statement_block" {
-                    replacements.push((
-                        body.start_byte(),
-                        body.end_byte(),
-                        "{ /* ... */ }",
-                    ));
+                    replacements.push((body.start_byte(), body.end_byte(), "{ /* ... */ }"));
                     return;
                 }
             }
@@ -150,11 +134,7 @@ fn collect_ts_bodies(
         "arrow_function" => {
             if let Some(body) = node.child_by_field_name("body") {
                 if body.kind() == "statement_block" {
-                    replacements.push((
-                        body.start_byte(),
-                        body.end_byte(),
-                        "{ /* ... */ }",
-                    ));
+                    replacements.push((body.start_byte(), body.end_byte(), "{ /* ... */ }"));
                     return;
                 }
                 // Если тело — выражение (не блок), не трогаем (однострочная стрелка)
@@ -192,11 +172,7 @@ fn collect_python_bodies(
         "function_definition" => {
             if let Some(body) = node.child_by_field_name("body") {
                 if body.kind() == "block" {
-                    replacements.push((
-                        body.start_byte(),
-                        body.end_byte(),
-                        "...",
-                    ));
+                    replacements.push((body.start_byte(), body.end_byte(), "..."));
                     return;
                 }
             }
@@ -244,7 +220,8 @@ fn generate_vue_skeleton(code: &str) -> Result<String> {
     let script_body = caps.get(2).unwrap();
     let close_tag = caps.get(3).unwrap();
 
-    let skeleton_script = generate_skeleton_internal(script_body.as_str(), SupportedLanguage::TypeScript)?;
+    let skeleton_script =
+        generate_skeleton_internal(script_body.as_str(), SupportedLanguage::TypeScript)?;
 
     let mut result = String::with_capacity(code.len());
     result.push_str(&code[..open_tag.end()]);
@@ -273,23 +250,14 @@ fn merge_ranges<'a>(ranges: &[(usize, usize, &'a str)]) -> Vec<(usize, usize, &'
 
 // --- Go: struct fields ---
 
-
-fn collect_go_bodies(
-    node: Node<'_>,
-    _code: &str,
-    replacements: &mut Vec<(usize, usize, &str)>,
-) {
+fn collect_go_bodies(node: Node<'_>, _code: &str, replacements: &mut Vec<(usize, usize, &str)>) {
     let kind = node.kind();
 
     match kind {
         "function_declaration" | "method_declaration" => {
             if let Some(body) = node.child_by_field_name("body") {
                 if body.kind() == "block" {
-                    replacements.push((
-                        body.start_byte(),
-                        body.end_byte(),
-                        "{ /* ... */ }",
-                    ));
+                    replacements.push((body.start_byte(), body.end_byte(), "{ /* ... */ }"));
                     return;
                 }
             }

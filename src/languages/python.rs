@@ -5,8 +5,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tree_sitter::Parser;
 
-use crate::storage::SqliteStorage;
 use super::{LanguageService, ToolDefinition};
+use crate::storage::SqliteStorage;
 
 // ---------------------------------------------------------------------------
 // Environment detection models
@@ -126,7 +126,12 @@ fn detect_environment(root: &Path) -> PythonEnvironment {
         if let Ok(raw) = std::fs::read_to_string(&pyproject) {
             if let Ok(parsed) = toml::from_str::<PyProject>(&raw) {
                 // Check Poetry
-                if parsed.tool.as_ref().and_then(|t| t.poetry.as_ref()).is_some() {
+                if parsed
+                    .tool
+                    .as_ref()
+                    .and_then(|t| t.poetry.as_ref())
+                    .is_some()
+                {
                     return PythonEnvironment {
                         manager: PackageManager::Poetry,
                         manifest_path: Some(pyproject),
@@ -230,10 +235,7 @@ fn read_poetry_manifest(root: &Path) -> Result<(String, Vec<Dependency>)> {
     let parsed: PyProject = toml::from_str(&raw)?;
 
     let mut deps = Vec::new();
-    let poetry = parsed
-        .tool
-        .as_ref()
-        .and_then(|t| t.poetry.as_ref());
+    let poetry = parsed.tool.as_ref().and_then(|t| t.poetry.as_ref());
 
     if let Some(poetry) = poetry {
         // Main dependencies
@@ -264,7 +266,8 @@ fn read_poetry_manifest(root: &Path) -> Result<(String, Vec<Dependency>)> {
         // Dependency groups (Poetry 1.2+)
         if let Some(ref groups) = poetry.group {
             for (group_name, group_val) in groups {
-                if let Some(group_deps) = group_val.as_table()
+                if let Some(group_deps) = group_val
+                    .as_table()
                     .and_then(|t| t.get("dependencies"))
                     .and_then(|d| d.as_table())
                 {
@@ -566,7 +569,9 @@ fn collect_decorators(node: &tree_sitter::Node, code: &str) -> Vec<String> {
     decorators
 }
 
-fn find_inner_definition<'a>(decorated: &'a tree_sitter::Node<'a>) -> Option<tree_sitter::Node<'a>> {
+fn find_inner_definition<'a>(
+    decorated: &'a tree_sitter::Node<'a>,
+) -> Option<tree_sitter::Node<'a>> {
     let mut cursor = decorated.walk();
     for child in decorated.children(&mut cursor) {
         match child.kind() {
@@ -706,17 +711,15 @@ fn parse_function_node(node: &tree_sitter::Node, code: &str) -> FunctionInfo {
         .unwrap_or_else(|| "()".to_string());
 
     // Return type annotation
-    let return_type = node
-        .child_by_field_name("return_type")
-        .map(|n| {
-            let text = node_text(&n, code).trim().to_string();
-            // Strip leading "-> " if present
-            if let Some(stripped) = text.strip_prefix("->") {
-                stripped.trim().to_string()
-            } else {
-                text
-            }
-        });
+    let return_type = node.child_by_field_name("return_type").map(|n| {
+        let text = node_text(&n, code).trim().to_string();
+        // Strip leading "-> " if present
+        if let Some(stripped) = text.strip_prefix("->") {
+            stripped.trim().to_string()
+        } else {
+            text
+        }
+    });
 
     FunctionInfo {
         name,
@@ -827,20 +830,97 @@ fn resolve_module_parts(module: &str, base: &Path, kind: &str) -> Option<(PathBu
 /// Rough heuristic for common stdlib modules
 fn is_likely_stdlib(top_level: &str) -> bool {
     const STDLIB: &[&str] = &[
-        "abc", "argparse", "ast", "asyncio", "base64", "collections", "contextlib",
-        "copy", "csv", "ctypes", "dataclasses", "datetime", "decimal", "difflib",
-        "email", "enum", "functools", "glob", "hashlib", "hmac", "html", "http",
-        "importlib", "inspect", "io", "itertools", "json", "logging", "math",
-        "multiprocessing", "operator", "os", "pathlib", "pickle", "platform",
-        "pprint", "queue", "random", "re", "secrets", "shutil", "signal",
-        "socket", "sqlite3", "ssl", "string", "struct", "subprocess", "sys",
-        "tempfile", "textwrap", "threading", "time", "timeit", "traceback",
-        "typing", "unittest", "urllib", "uuid", "warnings", "weakref", "xml",
-        "zipfile", "zlib", "builtins", "codecs", "concurrent", "configparser",
-        "dis", "fractions", "ftplib", "getpass", "grp", "gzip", "heapq",
-        "ipaddress", "lzma", "mimetypes", "numbers", "posixpath", "pwd",
-        "selectors", "shelve", "smtplib", "statistics", "sysconfig",
-        "tarfile", "tkinter", "trace", "types", "unicodedata",
+        "abc",
+        "argparse",
+        "ast",
+        "asyncio",
+        "base64",
+        "collections",
+        "contextlib",
+        "copy",
+        "csv",
+        "ctypes",
+        "dataclasses",
+        "datetime",
+        "decimal",
+        "difflib",
+        "email",
+        "enum",
+        "functools",
+        "glob",
+        "hashlib",
+        "hmac",
+        "html",
+        "http",
+        "importlib",
+        "inspect",
+        "io",
+        "itertools",
+        "json",
+        "logging",
+        "math",
+        "multiprocessing",
+        "operator",
+        "os",
+        "pathlib",
+        "pickle",
+        "platform",
+        "pprint",
+        "queue",
+        "random",
+        "re",
+        "secrets",
+        "shutil",
+        "signal",
+        "socket",
+        "sqlite3",
+        "ssl",
+        "string",
+        "struct",
+        "subprocess",
+        "sys",
+        "tempfile",
+        "textwrap",
+        "threading",
+        "time",
+        "timeit",
+        "traceback",
+        "typing",
+        "unittest",
+        "urllib",
+        "uuid",
+        "warnings",
+        "weakref",
+        "xml",
+        "zipfile",
+        "zlib",
+        "builtins",
+        "codecs",
+        "concurrent",
+        "configparser",
+        "dis",
+        "fractions",
+        "ftplib",
+        "getpass",
+        "grp",
+        "gzip",
+        "heapq",
+        "ipaddress",
+        "lzma",
+        "mimetypes",
+        "numbers",
+        "posixpath",
+        "pwd",
+        "selectors",
+        "shelve",
+        "smtplib",
+        "statistics",
+        "sysconfig",
+        "tarfile",
+        "tkinter",
+        "trace",
+        "types",
+        "unicodedata",
     ];
     STDLIB.contains(&top_level)
 }
@@ -910,7 +990,10 @@ fn run_linter(file_path: &Path, root: &Path) -> Result<String> {
     if let Ok(output) = pylint_result {
         let stdout = String::from_utf8_lossy(&output.stdout);
         if !stdout.is_empty() {
-            return Ok(format!("## pylint output\n\n```json\n{}\n```", stdout.trim()));
+            return Ok(format!(
+                "## pylint output\n\n```json\n{}\n```",
+                stdout.trim()
+            ));
         }
         if output.status.success() {
             return Ok("No issues found (pylint).".into());
@@ -935,14 +1018,8 @@ fn format_ruff_output(issues: &[Value]) -> Result<String> {
             .and_then(|l| l.get("row"))
             .and_then(|r| r.as_u64())
             .unwrap_or(0);
-        let code = issue
-            .get("code")
-            .and_then(|c| c.as_str())
-            .unwrap_or("?");
-        let message = issue
-            .get("message")
-            .and_then(|m| m.as_str())
-            .unwrap_or("");
+        let code = issue.get("code").and_then(|c| c.as_str()).unwrap_or("?");
+        let message = issue.get("message").and_then(|m| m.as_str()).unwrap_or("");
         out.push_str(&format!("| {} | {} | {} |\n", line, code, message));
     }
 
@@ -1037,24 +1114,15 @@ impl LanguageService for PythonService {
                     .get("import_path")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let from_file = args
-                    .get("from_file")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let from_file = args.get("from_file").and_then(|v| v.as_str()).unwrap_or("");
                 self.tool_resolve_import(import_path, from_file, root).await
             }
             "python_inspect_code" => {
-                let file_path = args
-                    .get("file")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let file_path = args.get("file").and_then(|v| v.as_str()).unwrap_or("");
                 self.tool_inspect_code(file_path, root).await
             }
             "python_run_linter" => {
-                let file_path = args
-                    .get("file")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let file_path = args.get("file").and_then(|v| v.as_str()).unwrap_or("");
                 self.tool_run_linter(file_path, root).await
             }
             _ => anyhow::bail!("Unknown Python tool: {}", name),
@@ -1165,10 +1233,16 @@ impl PythonService {
                             if !classes.is_empty() || !functions.is_empty() {
                                 out.push_str("\n### Available names\n\n");
                                 for cls in &classes {
-                                    out.push_str(&format!("- `class {}` (line {})\n", cls.name, cls.line));
+                                    out.push_str(&format!(
+                                        "- `class {}` (line {})\n",
+                                        cls.name, cls.line
+                                    ));
                                 }
                                 for func in &functions {
-                                    out.push_str(&format!("- `def {}` (line {})\n", func.name, func.line));
+                                    out.push_str(&format!(
+                                        "- `def {}` (line {})\n",
+                                        func.name, func.line
+                                    ));
                                 }
                             }
                         }
@@ -1224,7 +1298,8 @@ impl PythonService {
 
             if !cls.decorators.is_empty() {
                 out.push_str("**Decorators:** ");
-                let decs: Vec<String> = cls.decorators.iter().map(|d| format!("`@{}`", d)).collect();
+                let decs: Vec<String> =
+                    cls.decorators.iter().map(|d| format!("`@{}`", d)).collect();
                 out.push_str(&decs.join(", "));
                 out.push_str("\n\n");
             }
@@ -1245,10 +1320,7 @@ impl PythonService {
                 out.push_str("| Method | Parameters | Return | Decorators |\n");
                 out.push_str("|--------|-----------|--------|------------|\n");
                 for method in &cls.methods {
-                    let ret = method
-                        .return_type
-                        .as_deref()
-                        .unwrap_or("—");
+                    let ret = method.return_type.as_deref().unwrap_or("—");
                     let decs = if method.decorators.is_empty() {
                         "—".to_string()
                     } else {

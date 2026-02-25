@@ -10,11 +10,7 @@ use super::state::DaemonMetrics;
 
 /// Start a tiny HTTP server on `addr` (e.g. "127.0.0.1:9091") that serves
 /// Prometheus text metrics at any path. Stops when the cancel token fires.
-pub async fn serve_metrics(
-    addr: &str,
-    metrics: Arc<DaemonMetrics>,
-    cancel: CancellationToken,
-) {
+pub async fn serve_metrics(addr: &str, metrics: Arc<DaemonMetrics>, cancel: CancellationToken) {
     let listener = match TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {

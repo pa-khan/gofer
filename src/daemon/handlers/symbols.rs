@@ -1,17 +1,22 @@
-use anyhow::Result;
-use serde_json::{json, Value};
+use super::common::{make_relative, resolve_path, ToolContext};
 use crate::error::goferError;
 use crate::models::chunk::SymbolWithPath;
-use super::common::{ToolContext, resolve_path, make_relative};
+use anyhow::Result;
+use serde_json::{json, Value};
 
 pub async fn tool_get_symbols(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file_filter = args.get("file").and_then(|v| v.as_str());
     let kind_filter = args.get("kind").and_then(|v| v.as_str());
     let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(200).min(500) as u32;
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(200)
+        .min(500) as u32;
 
     // Feature 008 - Check rkyv cache first
-    let cache_key = format!("rkyv:{}:{}:{}:{}",
+    let cache_key = format!(
+        "rkyv:{}:{}:{}:{}",
         file_filter.unwrap_or("_all_"),
         kind_filter.unwrap_or("_all_"),
         offset,
@@ -23,21 +28,24 @@ pub async fn tool_get_symbols(args: Value, ctx: &ToolContext) -> Result<Value> {
         match rkyv::check_archived_root::<Vec<SymbolWithPath>>(&cached_bytes) {
             Ok(archived) => {
                 // Convert archived data back to JSON
-                let symbols: Vec<SymbolWithPath> = archived.iter().map(|s| {
-                    // Deserialize ArchivedSymbolKind to SymbolKind using trait method
-                    use rkyv::Deserialize;
-                    let kind = s.kind.deserialize(&mut rkyv::Infallible).unwrap();
+                let symbols: Vec<SymbolWithPath> = archived
+                    .iter()
+                    .map(|s| {
+                        // Deserialize ArchivedSymbolKind to SymbolKind using trait method
+                        use rkyv::Deserialize;
+                        let kind = s.kind.deserialize(&mut rkyv::Infallible).unwrap();
 
-                    SymbolWithPath {
-                        id: s.id,
-                        name: s.name.to_string(),
-                        kind,
-                        line: s.line,
-                        end_line: s.end_line,
-                        signature: s.signature.as_ref().map(|s| s.to_string()),
-                        file_path: s.file_path.to_string(),
-                    }
-                }).collect();
+                        SymbolWithPath {
+                            id: s.id,
+                            name: s.name.to_string(),
+                            kind,
+                            line: s.line,
+                            end_line: s.end_line,
+                            signature: s.signature.as_ref().map(|s| s.to_string()),
+                            file_path: s.file_path.to_string(),
+                        }
+                    })
+                    .collect();
 
                 let count = symbols.len() as u32;
                 let final_result = json!({
@@ -65,7 +73,10 @@ pub async fn tool_get_symbols(args: Value, ctx: &ToolContext) -> Result<Value> {
     let resolved_path = file_filter.map(|f| resolve_path(&ctx.root_path, f));
     let file_filter_resolved = resolved_path.as_deref();
 
-    let symbols = &ctx.sqlite.get_symbols(file_filter_resolved, kind_filter, offset, limit).await?;
+    let symbols = &ctx
+        .sqlite
+        .get_symbols(file_filter_resolved, kind_filter, offset, limit)
+        .await?;
     let count = symbols.len() as u32;
 
     let final_result = json!({
@@ -112,7 +123,10 @@ pub async fn tool_get_references(args: Value, ctx: &ToolContext) -> Result<Value
 
 pub async fn tool_search_symbols(args: Value, ctx: &ToolContext) -> Result<Value> {
     let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-    let kind = args.get("kind").and_then(|v| v.as_str()).map(crate::models::chunk::SymbolKind::from_str);
+    let kind = args
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .map(crate::models::chunk::SymbolKind::from_str);
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
 
     if query.is_empty() {
@@ -120,7 +134,10 @@ pub async fn tool_search_symbols(args: Value, ctx: &ToolContext) -> Result<Value
     }
 
     // Using FTS search with path info
-    let symbols = ctx.sqlite.search_symbols_with_path(query, (limit * 2) as i32).await?;
+    let symbols = ctx
+        .sqlite
+        .search_symbols_with_path(query, (limit * 2) as i32)
+        .await?;
 
     let mut filtered: Vec<_> = if let Some(k) = kind {
         symbols.into_iter().filter(|s| s.kind == k).collect()
@@ -152,7 +169,8 @@ pub async fn tool_get_callers(args: Value, ctx: &ToolContext) -> Result<Value> {
     let refs = &ctx.sqlite.get_references_by_name(symbol).await?;
 
     // Filter for calls/usages
-    let callers: Vec<_> = refs.iter()
+    let callers: Vec<_> = refs
+        .iter()
         .filter(|r| r.ref_kind == "call" || r.ref_kind == "usage")
         .collect();
 
@@ -195,7 +213,10 @@ pub async fn tool_symbol_exists(args: Value, ctx: &ToolContext) -> Result<Value>
     let exists = if let Some(f) = file {
         let abs_path = resolve_path(&ctx.root_path, f);
         // Check if symbol exists in specific file
-        let symbols = ctx.sqlite.get_symbols(Some(&abs_path), None, 0, 1000).await?;
+        let symbols = ctx
+            .sqlite
+            .get_symbols(Some(&abs_path), None, 0, 1000)
+            .await?;
         symbols.iter().any(|s| s.name == symbol)
     } else {
         // Global check
@@ -219,7 +240,9 @@ pub async fn tool_is_exported(args: Value, ctx: &ToolContext) -> Result<Value> {
 
     let matches = if let Some(f) = file {
         let abs_path = resolve_path(&ctx.root_path, f);
-        ctx.sqlite.get_symbols(Some(&abs_path), None, 0, 1000).await?
+        ctx.sqlite
+            .get_symbols(Some(&abs_path), None, 0, 1000)
+            .await?
             .into_iter()
             .filter(|s| s.name == symbol)
             .collect()
@@ -238,8 +261,9 @@ pub async fn tool_is_exported(args: Value, ctx: &ToolContext) -> Result<Value> {
     // Heuristic check for export status based on signature/kind
     let is_exported = matches.iter().any(|s| {
         let sig = s.signature.as_deref().unwrap_or("").trim();
-        sig.starts_with("pub ") || sig.starts_with("export ") ||
-        (!s.name.starts_with('_') && s.kind != crate::models::chunk::SymbolKind::LocalVar)
+        sig.starts_with("pub ")
+            || sig.starts_with("export ")
+            || (!s.name.starts_with('_') && s.kind != crate::models::chunk::SymbolKind::LocalVar)
     });
 
     Ok(json!({
@@ -259,7 +283,9 @@ pub async fn tool_has_documentation(args: Value, ctx: &ToolContext) -> Result<Va
 
     let matches = if let Some(f) = file {
         let abs_path = resolve_path(&ctx.root_path, f);
-        ctx.sqlite.get_symbols(Some(&abs_path), None, 0, 1000).await?
+        ctx.sqlite
+            .get_symbols(Some(&abs_path), None, 0, 1000)
+            .await?
             .into_iter()
             .filter(|s| s.name == symbol)
             .collect()

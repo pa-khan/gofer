@@ -2,11 +2,11 @@
 //!
 //! Implements Circuit Breaker pattern for external services (Embedder, LLM).
 
+use anyhow::anyhow;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use std::time::{Duration, Instant};
-use anyhow::anyhow;
+use tokio::sync::RwLock;
 
 /// Circuit breaker state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,14 +96,20 @@ impl CircuitBreaker {
         let failures = self.failure_count.fetch_add(1, Ordering::Relaxed) + 1;
         if failures >= self.failure_threshold {
             let mut state = self.state.write().await;
-            if *state != (CircuitState::Open { opened_at: Instant::now() }) { // dummy check to satisfy type checker, logic handles it
+            if *state
+                != (CircuitState::Open {
+                    opened_at: Instant::now(),
+                })
+            { // dummy check to satisfy type checker, logic handles it
                  // Actually we want to check if it's NOT open, then open it.
                  // But we can just overwrite it.
             }
             // Transition to Open
             match *state {
                 CircuitState::Closed | CircuitState::HalfOpen => {
-                    *state = CircuitState::Open { opened_at: Instant::now() };
+                    *state = CircuitState::Open {
+                        opened_at: Instant::now(),
+                    };
                     tracing::warn!("Circuit breaker tripped (open)");
                 }
                 _ => {}

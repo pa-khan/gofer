@@ -1,8 +1,8 @@
 use regex::Regex;
 use tree_sitter::{Node, Parser};
 
+use super::core::{ParserError, Result, SupportedLanguage};
 use crate::models::TypeField;
-use super::core::{SupportedLanguage, ParserError, Result};
 
 // === Structural Fingerprinting (извлечение полей struct/interface через AST) ===
 
@@ -108,7 +108,11 @@ pub fn parse_all_type_fields(
 
 // --- Rust: struct fields ---
 
-fn extract_rust_struct_fields(root: Node<'_>, code: &str, type_name: &str) -> Result<Vec<TypeField>> {
+fn extract_rust_struct_fields(
+    root: Node<'_>,
+    code: &str,
+    type_name: &str,
+) -> Result<Vec<TypeField>> {
     for i in 0..root.child_count() {
         let Some(node) = root.child(i) else { continue };
         if node.kind() == "struct_item" {
@@ -122,7 +126,11 @@ fn extract_rust_struct_fields(root: Node<'_>, code: &str, type_name: &str) -> Re
     Ok(Vec::new())
 }
 
-fn collect_all_rust_structs(root: Node<'_>, code: &str, results: &mut Vec<(String, Vec<TypeField>)>) {
+fn collect_all_rust_structs(
+    root: Node<'_>,
+    code: &str,
+    results: &mut Vec<(String, Vec<TypeField>)>,
+) {
     for i in 0..root.child_count() {
         let Some(node) = root.child(i) else { continue };
         if node.kind() == "struct_item" {
@@ -166,7 +174,11 @@ fn extract_fields_from_rust_struct(node: Node<'_>, code: &str) -> Vec<TypeField>
 
 // --- TypeScript/JavaScript: interface/type fields ---
 
-fn extract_ts_interface_fields(root: Node<'_>, code: &str, type_name: &str) -> Result<Vec<TypeField>> {
+fn extract_ts_interface_fields(
+    root: Node<'_>,
+    code: &str,
+    type_name: &str,
+) -> Result<Vec<TypeField>> {
     for i in 0..root.child_count() {
         let Some(node) = root.child(i) else { continue };
         let kind = node.kind();
@@ -183,7 +195,9 @@ fn extract_ts_interface_fields(root: Node<'_>, code: &str, type_name: &str) -> R
         if kind == "export_statement" {
             for j in 0..node.child_count() {
                 let Some(inner) = node.child(j) else { continue };
-                if inner.kind() == "interface_declaration" || inner.kind() == "type_alias_declaration" {
+                if inner.kind() == "interface_declaration"
+                    || inner.kind() == "type_alias_declaration"
+                {
                     if let Some(name_node) = inner.child_by_field_name("name") {
                         if &code[name_node.byte_range()] == type_name {
                             return Ok(extract_fields_from_ts_node(inner, code));
@@ -196,14 +210,22 @@ fn extract_ts_interface_fields(root: Node<'_>, code: &str, type_name: &str) -> R
     Ok(Vec::new())
 }
 
-fn collect_all_ts_interfaces(root: Node<'_>, code: &str, results: &mut Vec<(String, Vec<TypeField>)>) {
+fn collect_all_ts_interfaces(
+    root: Node<'_>,
+    code: &str,
+    results: &mut Vec<(String, Vec<TypeField>)>,
+) {
     for i in 0..root.child_count() {
         let Some(node) = root.child(i) else { continue };
         collect_ts_interface_recursive(node, code, results);
     }
 }
 
-fn collect_ts_interface_recursive(node: Node<'_>, code: &str, results: &mut Vec<(String, Vec<TypeField>)>) {
+fn collect_ts_interface_recursive(
+    node: Node<'_>,
+    code: &str,
+    results: &mut Vec<(String, Vec<TypeField>)>,
+) {
     let kind = node.kind();
 
     if kind == "interface_declaration" || kind == "type_alias_declaration" {
@@ -273,7 +295,11 @@ fn extract_fields_from_ts_node(node: Node<'_>, code: &str) -> Vec<TypeField> {
 
 // --- Python: class fields (type annotations) ---
 
-fn extract_python_class_fields(root: Node<'_>, code: &str, type_name: &str) -> Result<Vec<TypeField>> {
+fn extract_python_class_fields(
+    root: Node<'_>,
+    code: &str,
+    type_name: &str,
+) -> Result<Vec<TypeField>> {
     for i in 0..root.child_count() {
         let Some(node) = root.child(i) else { continue };
         let kind = node.kind();
@@ -288,7 +314,9 @@ fn extract_python_class_fields(root: Node<'_>, code: &str, type_name: &str) -> R
                 Some(node)
             };
 
-            let Some(class_node) = class_node else { continue };
+            let Some(class_node) = class_node else {
+                continue;
+            };
 
             if let Some(name_node) = class_node.child_by_field_name("name") {
                 if &code[name_node.byte_range()] == type_name {
@@ -300,7 +328,11 @@ fn extract_python_class_fields(root: Node<'_>, code: &str, type_name: &str) -> R
     Ok(Vec::new())
 }
 
-fn collect_all_python_classes(root: Node<'_>, code: &str, results: &mut Vec<(String, Vec<TypeField>)>) {
+fn collect_all_python_classes(
+    root: Node<'_>,
+    code: &str,
+    results: &mut Vec<(String, Vec<TypeField>)>,
+) {
     for i in 0..root.child_count() {
         let Some(node) = root.child(i) else { continue };
         let kind = node.kind();
@@ -315,7 +347,9 @@ fn collect_all_python_classes(root: Node<'_>, code: &str, results: &mut Vec<(Str
             None
         };
 
-        let Some(class_node) = class_node else { continue };
+        let Some(class_node) = class_node else {
+            continue;
+        };
 
         if let Some(name_node) = class_node.child_by_field_name("name") {
             let name = code[name_node.byte_range()].to_string();
@@ -346,7 +380,8 @@ fn extract_fields_from_python_class(class_node: Node<'_>, code: &str) -> Vec<Typ
                         if name_node.kind() == "identifier" {
                             let name = code[name_node.byte_range()].to_string();
                             if !name.starts_with('_') {
-                                let field_type = expr.child(2).map(|t| code[t.byte_range()].to_string());
+                                let field_type =
+                                    expr.child(2).map(|t| code[t.byte_range()].to_string());
                                 let normalized = normalize_field(&name);
                                 fields.push(TypeField {
                                     name,
@@ -420,7 +455,9 @@ fn extract_fields_from_go_struct(struct_node: Node<'_>, code: &str) -> Vec<TypeF
     } else {
         // Some tree-sitter-go versions: struct_type children include field_declaration directly
         for i in 0..struct_node.child_count() {
-            let Some(child) = struct_node.child(i) else { continue };
+            let Some(child) = struct_node.child(i) else {
+                continue;
+            };
             if child.kind() == "field_declaration_list" {
                 extract_go_fields_from_body(child, code, &mut fields);
             }
@@ -452,4 +489,3 @@ fn extract_go_fields_from_body(body: Node<'_>, code: &str, fields: &mut Vec<Type
 }
 
 // --- Go: skeleton body collection ---
-

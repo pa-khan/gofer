@@ -5,9 +5,9 @@ use anyhow::Result;
 use regex::Regex;
 use serde_json::{json, Value};
 
+use super::{LanguageService, ToolDefinition};
 use crate::indexer::diagnostics::CargoMessage;
 use crate::storage::SqliteStorage;
-use super::{LanguageService, ToolDefinition};
 
 // ---------------------------------------------------------------------------
 // Compiled regex patterns (LazyLock for one-time initialization)
@@ -17,9 +17,8 @@ static TEST_SUMMARY_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"test result: (\w+)\.\s+(\d+) passed;\s+(\d+) failed;\s+(\d+) ignored").unwrap()
 });
 
-static TEST_FAILURE_HEADER_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"---- (\S+) stdout ----").unwrap()
-});
+static TEST_FAILURE_HEADER_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"---- (\S+) stdout ----").unwrap());
 
 pub struct RustService {
     sqlite: SqliteStorage,
@@ -228,14 +227,30 @@ fn format_diagnostics(entries: &[DiagnosticEntry], header: &str) -> String {
 
     let errors = entries.iter().filter(|e| e.level == "error").count();
     let warnings = entries.iter().filter(|e| e.level == "warning").count();
-    out.push_str(&format!("Found {} error(s), {} warning(s)\n\n", errors, warnings));
+    out.push_str(&format!(
+        "Found {} error(s), {} warning(s)\n\n",
+        errors, warnings
+    ));
 
     for e in entries {
         let code_str = e.code.as_deref().unwrap_or("");
         if code_str.is_empty() {
-            out.push_str(&format!("- **[{}]** `{}:{}`: {}\n", e.level.to_uppercase(), e.file, e.line, e.message));
+            out.push_str(&format!(
+                "- **[{}]** `{}:{}`: {}\n",
+                e.level.to_uppercase(),
+                e.file,
+                e.line,
+                e.message
+            ));
         } else {
-            out.push_str(&format!("- **[{}]** `{}:{}` ({}): {}\n", e.level.to_uppercase(), e.file, e.line, code_str, e.message));
+            out.push_str(&format!(
+                "- **[{}]** `{}:{}` ({}): {}\n",
+                e.level.to_uppercase(),
+                e.file,
+                e.line,
+                code_str,
+                e.message
+            ));
         }
     }
 
@@ -281,7 +296,10 @@ impl RustService {
                 let name = pkg["name"].as_str().unwrap_or("?");
                 let version = pkg["version"].as_str().unwrap_or("?");
                 let edition = pkg["edition"].as_str().unwrap_or("2021");
-                out.push_str(&format!("### `{}` v{} (edition {})\n\n", name, version, edition));
+                out.push_str(&format!(
+                    "### `{}` v{} (edition {})\n\n",
+                    name, version, edition
+                ));
 
                 // Dependencies
                 if let Some(deps) = pkg["dependencies"].as_array() {
@@ -339,12 +357,10 @@ impl RustService {
 
         let is_available = check.map(|s| s.success()).unwrap_or(false);
         if !is_available {
-            return Ok(
-                "**cargo-expand is not installed.**\n\n\
+            return Ok("**cargo-expand is not installed.**\n\n\
                  Install it with:\n```\ncargo install cargo-expand\n```\n\
                  Then re-run this tool."
-                    .into(),
-            );
+                .into());
         }
 
         let mut cmd = tokio::process::Command::new("cargo");
@@ -391,7 +407,10 @@ impl RustService {
             .ok_or_else(|| anyhow::anyhow!("File not found for struct"))?;
 
         let mut out = format!("# Struct: `{}`\n\n", struct_name);
-        out.push_str(&format!("**Location:** `{}:{}`\n\n", file.path, struct_sym.line_start));
+        out.push_str(&format!(
+            "**Location:** `{}:{}`\n\n",
+            file.path, struct_sym.line_start
+        ));
 
         if let Some(ref sig) = struct_sym.signature {
             out.push_str(&format!("```rust\n{}\n```\n\n", sig));
@@ -409,10 +428,7 @@ impl RustService {
             out.push_str("## Implementations\n\n");
             for ib in &impl_blocks {
                 let default_header = format!("impl {}", struct_name);
-                let header = ib
-                    .signature
-                    .as_deref()
-                    .unwrap_or(&default_header);
+                let header = ib.signature.as_deref().unwrap_or(&default_header);
                 out.push_str(&format!("### `{}` (line {})\n\n", header, ib.line_start));
 
                 // Methods inside this impl block (by line range)
@@ -461,12 +477,12 @@ impl RustService {
         }
 
         // References
-        let refs = self
-            .sqlite
-            .get_incoming_references(struct_name)
-            .await?;
+        let refs = self.sqlite.get_incoming_references(struct_name).await?;
         if !refs.is_empty() {
-            out.push_str(&format!("## References\n\nUsed by **{}** symbol(s).\n", refs.len()));
+            out.push_str(&format!(
+                "## References\n\nUsed by **{}** symbol(s).\n",
+                refs.len()
+            ));
         }
 
         Ok(out)
@@ -482,7 +498,10 @@ impl RustService {
         // Query all symbols named after the trait — impl blocks may store the
         // trait name when it's `impl Trait for Type`.
         let symbols = self.sqlite.get_symbol_by_name(trait_name).await?;
-        let impls: Vec<_> = symbols.iter().filter(|s| s.kind == crate::models::chunk::SymbolKind::Impl).collect();
+        let impls: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.kind == crate::models::chunk::SymbolKind::Impl)
+            .collect();
 
         let mut out = format!("# Implementations of `{}`\n\n", trait_name);
 
@@ -571,10 +590,7 @@ impl RustService {
         } else {
             out.push_str("**Resolved to:**\n\n");
             for c in &candidates {
-                let display = c
-                    .strip_prefix(root)
-                    .unwrap_or(c)
-                    .display();
+                let display = c.strip_prefix(root).unwrap_or(c).display();
                 out.push_str(&format!("- `{}`\n", display));
             }
         }
@@ -612,11 +628,9 @@ impl RustService {
 
         let is_available = check.map(|s| s.success()).unwrap_or(false);
         if !is_available {
-            return Ok(
-                "**clippy is not installed.**\n\n\
+            return Ok("**clippy is not installed.**\n\n\
                  Install it with:\n```\nrustup component add clippy\n```\n"
-                    .into(),
-            );
+                .into());
         }
 
         let output = tokio::process::Command::new("cargo")
@@ -674,7 +688,9 @@ impl RustService {
                 // Pattern: "---- test_name stdout ----" ... "failures:"
                 let sections: Vec<&str> = combined.split("---- ").collect();
                 for section in &sections[1..] {
-                    if let Some(hcaps) = TEST_FAILURE_HEADER_RE.captures(&format!("---- {}", section)) {
+                    if let Some(hcaps) =
+                        TEST_FAILURE_HEADER_RE.captures(&format!("---- {}", section))
+                    {
                         let tname = hcaps.get(1).map(|m| m.as_str()).unwrap_or("?");
                         // Get content up to the next separator
                         let body = section

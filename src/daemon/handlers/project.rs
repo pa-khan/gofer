@@ -1,9 +1,9 @@
+use super::common::{make_relative, resolve_path, ToolContext};
+use crate::error::goferError;
+use crate::models::Rule;
 use anyhow::Result;
 use serde_json::{json, Value};
-use crate::error::goferError;
-use super::common::{ToolContext, resolve_path, make_relative};
-use crate::models::Rule;
-use walkdir::{WalkDir, DirEntry};
+use walkdir::{DirEntry, WalkDir};
 
 pub async fn tool_project_tree(args: Value, ctx: &ToolContext) -> Result<Value> {
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -33,11 +33,17 @@ pub async fn tool_project_tree(args: Value, ctx: &ToolContext) -> Result<Value> 
     for entry in walker.filter_entry(|e: &DirEntry| {
         let name = e.file_name().to_string_lossy();
         // Skip hidden and common ignored dirs
-        !name.starts_with('.') && name != "node_modules" && name != "target" && name != "dist" && name != "build"
+        !name.starts_with('.')
+            && name != "node_modules"
+            && name != "target"
+            && name != "dist"
+            && name != "build"
     }) {
         if let Ok(e) = entry {
             let relative = make_relative(&ctx.root_path, e.path().to_str().unwrap_or(""));
-            if relative.is_empty() { continue; } // skip root itself if empty
+            if relative.is_empty() {
+                continue;
+            } // skip root itself if empty
 
             // Apply pattern filter only to files, or inclusion logic
             if let Some(ref gp) = glob_pat {
@@ -115,18 +121,28 @@ pub async fn tool_get_api_routes(args: Value, ctx: &ToolContext) -> Result<Value
 
     if side.is_none() || side == Some("backend") {
         let endpoints = &ctx.sqlite.get_api_endpoints().await?;
-        backend_routes = endpoints.iter().map(|ep| json!({
-            "method": ep.method,
-            "path": ep.path
-        })).collect();
+        backend_routes = endpoints
+            .iter()
+            .map(|ep| {
+                json!({
+                    "method": ep.method,
+                    "path": ep.path
+                })
+            })
+            .collect();
     }
 
     if side.is_none() || side == Some("frontend") {
         let calls = &ctx.sqlite.get_frontend_api_calls().await?;
-        frontend_calls = calls.iter().map(|call| json!({
-            "method": call.method,
-            "path": call.path
-        })).collect();
+        frontend_calls = calls
+            .iter()
+            .map(|call| {
+                json!({
+                    "method": call.method,
+                    "path": call.path
+                })
+            })
+            .collect();
     }
 
     Ok(json!({
@@ -142,7 +158,11 @@ pub async fn tool_get_summary(args: Value, ctx: &ToolContext) -> Result<Value> {
         return Err(goferError::InvalidParams("File path is required".into()).into());
     }
 
-    match &ctx.sqlite.get_summary_by_path(&resolve_path(&ctx.root_path, file)).await? {
+    match &ctx
+        .sqlite
+        .get_summary_by_path(&resolve_path(&ctx.root_path, file))
+        .await?
+    {
         Some(summary) => Ok(json!({
             "file": file,
             "summary": summary.summary,
@@ -159,14 +179,9 @@ pub async fn tool_get_summary(args: Value, ctx: &ToolContext) -> Result<Value> {
             }
 
             let content = tokio::fs::read_to_string(&file_path).await?;
-            let ext = file_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
+            let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
-            if let Some(docstring) =
-                crate::indexer::summarizer::extract_docstring(&content, ext)
-            {
+            if let Some(docstring) = crate::indexer::summarizer::extract_docstring(&content, ext) {
                 Ok(json!({
                     "file": file,
                     "summary": docstring,
@@ -190,7 +205,11 @@ pub async fn tool_get_vue_tree(args: Value, ctx: &ToolContext) -> Result<Value> 
         return Err(goferError::InvalidParams("File path is required".into()).into());
     }
 
-    match &ctx.sqlite.get_vue_tree(&resolve_path(&ctx.root_path, file)).await? {
+    match &ctx
+        .sqlite
+        .get_vue_tree(&resolve_path(&ctx.root_path, file))
+        .await?
+    {
         Some(tree) => Ok(json!({
             "file": file,
             "tree": tree.tree_text
@@ -204,7 +223,10 @@ pub async fn tool_get_vue_tree(args: Value, ctx: &ToolContext) -> Result<Value> 
 }
 
 pub async fn tool_add_rule(args: Value, ctx: &ToolContext) -> Result<Value> {
-    let category = args.get("category").and_then(|v| v.as_str()).unwrap_or("general");
+    let category = args
+        .get("category")
+        .and_then(|v| v.as_str())
+        .unwrap_or("general");
     let rule = args.get("rule").and_then(|v| v.as_str()).unwrap_or("");
     let priority = args.get("priority").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
 
@@ -241,7 +263,9 @@ pub async fn tool_mark_golden_sample(args: Value, ctx: &ToolContext) -> Result<V
 
     // Find file_id
     if let Some(file) = ctx.sqlite.get_file(&file_path).await? {
-        ctx.sqlite.mark_golden_sample(file.id, category, description).await?;
+        ctx.sqlite
+            .mark_golden_sample(file.id, category, description)
+            .await?;
         Ok(json!({
             "status": "success",
             "file": file.path,

@@ -8,8 +8,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tree_sitter::Parser;
 
-use crate::storage::SqliteStorage;
 use super::{LanguageService, ToolDefinition};
+use crate::storage::SqliteStorage;
 
 // ---------------------------------------------------------------------------
 // Compiled regex patterns (LazyLock for one-time initialization)
@@ -41,7 +41,7 @@ struct CompilerOptions {
 /// Parsed and normalised path alias: prefix -> list of replacement roots
 #[derive(Debug, Clone)]
 struct PathAlias {
-    prefix: String,       // e.g. "@/"
+    prefix: String,            // e.g. "@/"
     replacements: Vec<String>, // e.g. ["src/"]
 }
 
@@ -123,10 +123,7 @@ fn strip_json_comments(input: &str) -> String {
 }
 
 fn build_aliases(opts: &CompilerOptions, _root: &Path) -> Vec<PathAlias> {
-    let base = opts
-        .base_url
-        .as_deref()
-        .unwrap_or(".");
+    let base = opts.base_url.as_deref().unwrap_or(".");
 
     let Some(paths) = &opts.paths else {
         return Vec::new();
@@ -496,9 +493,7 @@ fn find_function_in_node(
                 if node_name == name {
                     // Extract just the signature (without body)
                     let body_node = node.child_by_field_name("body");
-                    let sig_end = body_node
-                        .map(|b| b.start_byte())
-                        .unwrap_or(node.end_byte());
+                    let sig_end = body_node.map(|b| b.start_byte()).unwrap_or(node.end_byte());
                     let signature = code[node.start_byte()..sig_end].trim().to_string();
 
                     let exported = node
@@ -524,9 +519,8 @@ fn find_function_in_node(
                                 if val.kind() == "arrow_function" || val.kind() == "function" {
                                     // Get everything up to the body
                                     let body = val.child_by_field_name("body");
-                                    let sig_end = body
-                                        .map(|b| b.start_byte())
-                                        .unwrap_or(val.end_byte());
+                                    let sig_end =
+                                        body.map(|b| b.start_byte()).unwrap_or(val.end_byte());
                                     let full_sig =
                                         code[node.start_byte()..sig_end].trim().to_string();
 
@@ -593,7 +587,11 @@ fn collect_exports_from_node(
                             "enum_declaration" => "enum",
                             _ => "unknown",
                         };
-                        exports.push((name, label.to_string(), child.start_position().row as u32 + 1));
+                        exports.push((
+                            name,
+                            label.to_string(),
+                            child.start_position().row as u32 + 1,
+                        ));
                     }
                 }
                 "lexical_declaration" | "variable_declaration" => {
@@ -613,7 +611,11 @@ fn collect_exports_from_node(
                                         }
                                     })
                                     .unwrap_or("const");
-                                exports.push((name, label.to_string(), decl.start_position().row as u32 + 1));
+                                exports.push((
+                                    name,
+                                    label.to_string(),
+                                    decl.start_position().row as u32 + 1,
+                                ));
                             }
                         }
                     }
@@ -631,7 +633,11 @@ fn collect_exports_from_node(
                     if spec.kind() == "export_specifier" {
                         if let Some(nn) = spec.child_by_field_name("name") {
                             let name = code[nn.byte_range()].to_string();
-                            exports.push((name, "re-export".to_string(), spec.start_position().row as u32 + 1));
+                            exports.push((
+                                name,
+                                "re-export".to_string(),
+                                spec.start_position().row as u32 + 1,
+                            ));
                         }
                     }
                 }
@@ -751,10 +757,7 @@ impl TypeScriptService {
                 let path = file.map(|f| f.path).unwrap_or_else(|| "?".into());
 
                 out.push_str(&format!("**Kind:** {}\n", sym.kind));
-                out.push_str(&format!(
-                    "**Location:** `{}:{}`\n\n",
-                    path, sym.line_start
-                ));
+                out.push_str(&format!("**Location:** `{}:{}`\n\n", path, sym.line_start));
 
                 if let Some(ref sig) = sym.signature {
                     out.push_str(&format!("```typescript\n{}\n```\n\n", sig));
@@ -764,8 +767,7 @@ impl TypeScriptService {
                 let abs = root.join(&path);
                 if abs.exists() {
                     let code = std::fs::read_to_string(&abs).unwrap_or_default();
-                    if let Some((_kind, text, exported)) =
-                        find_type_definition(&code, symbol_name)
+                    if let Some((_kind, text, exported)) = find_type_definition(&code, symbol_name)
                     {
                         let exp = if exported { " // exported" } else { "" };
                         out.push_str(&format!(
@@ -795,9 +797,7 @@ impl TypeScriptService {
             let abs = root.join(fp);
             if abs.exists() {
                 let code = tokio::fs::read_to_string(&abs).await?;
-                if let Some((kind, sig, exported)) =
-                    find_function_signature(&code, function_name)
-                {
+                if let Some((kind, sig, exported)) = find_function_signature(&code, function_name) {
                     let exp = if exported { " (exported)" } else { "" };
                     out.push_str(&format!("**Kind:** {}{}\n", kind.replace('_', " "), exp));
                     out.push_str(&format!("**File:** `{}`\n\n", fp));
@@ -811,7 +811,10 @@ impl TypeScriptService {
         let symbols = self.sqlite.get_symbol_by_name(function_name).await?;
         let fn_syms: Vec<_> = symbols
             .iter()
-            .filter(|s| s.kind == crate::models::chunk::SymbolKind::Function || s.kind == crate::models::chunk::SymbolKind::Method)
+            .filter(|s| {
+                s.kind == crate::models::chunk::SymbolKind::Function
+                    || s.kind == crate::models::chunk::SymbolKind::Method
+            })
             .collect();
 
         if fn_syms.is_empty() {
@@ -821,9 +824,7 @@ impl TypeScriptService {
                 let Ok(code) = std::fs::read_to_string(f) else {
                     continue;
                 };
-                if let Some((kind, sig, exported)) =
-                    find_function_signature(&code, function_name)
-                {
+                if let Some((kind, sig, exported)) = find_function_signature(&code, function_name) {
                     let rel = f.strip_prefix(root).unwrap_or(f).display().to_string();
                     let exp = if exported { " (exported)" } else { "" };
                     out.push_str(&format!("**Kind:** {}{}\n", kind.replace('_', " "), exp));
@@ -838,10 +839,7 @@ impl TypeScriptService {
                 let file = self.sqlite.get_file_by_id(sym.file_id).await?;
                 let path = file.map(|f| f.path).unwrap_or_else(|| "?".into());
 
-                out.push_str(&format!(
-                    "**Location:** `{}:{}`\n",
-                    path, sym.line_start
-                ));
+                out.push_str(&format!("**Location:** `{}:{}`\n", path, sym.line_start));
 
                 if let Some(ref sig) = sym.signature {
                     out.push_str(&format!("```typescript\n{}\n```\n\n", sig));
@@ -932,10 +930,7 @@ impl TypeScriptService {
 
                 // Show what exports are available
                 if resolved.exists() {
-                    let ext = resolved
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .unwrap_or("");
+                    let ext = resolved.extension().and_then(|e| e.to_str()).unwrap_or("");
                     if ["ts", "tsx", "js", "jsx"].contains(&ext) {
                         let code = std::fs::read_to_string(&resolved).unwrap_or_default();
                         let exports = collect_exports(&code);
@@ -955,9 +950,7 @@ impl TypeScriptService {
                     let dir = abs_from.parent().unwrap_or(root);
                     out.push_str(&format!(
                         "- Relative from `{}`\n",
-                        dir.strip_prefix(root)
-                            .unwrap_or(dir)
-                            .display()
+                        dir.strip_prefix(root).unwrap_or(dir).display()
                     ));
                 } else {
                     for a in &self.aliases {
@@ -1088,7 +1081,10 @@ impl TypeScriptService {
                         path, r.line, src.name, r.kind
                     ));
                 } else {
-                    out.push_str(&format!("- line {} ({}) [source symbol not found]\n", r.line, r.kind));
+                    out.push_str(&format!(
+                        "- line {} ({}) [source symbol not found]\n",
+                        r.line, r.kind
+                    ));
                 }
             }
         }

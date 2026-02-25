@@ -1,10 +1,10 @@
-use std::path::Path;
-use std::collections::HashMap;
-use anyhow::Result;
-use serde_json::{json, Value};
+use super::common::{make_relative, resolve_path, ToolContext};
 use crate::error::goferError;
 use crate::models::chunk::SymbolKind;
-use super::common::{ToolContext, resolve_path, make_relative};
+use anyhow::Result;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::path::Path;
 
 /// Fused search hit from vector + FTS results
 pub struct FusedHit {
@@ -25,16 +25,20 @@ pub async fn tool_search(args: Value, ctx: &ToolContext) -> Result<Value> {
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
     // NEW: Phase 0 Feature 006 - search_with_scores
-    let include_scores = args.get("include_scores")
+    let include_scores = args
+        .get("include_scores")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let preview_mode = args.get("preview_mode")
+    let preview_mode = args
+        .get("preview_mode")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let min_score = args.get("min_score")
+    let min_score = args
+        .get("min_score")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0) as f32;
-    let include_context = args.get("include_context")
+    let include_context = args
+        .get("include_context")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
@@ -58,22 +62,38 @@ pub async fn tool_search(args: Value, ctx: &ToolContext) -> Result<Value> {
     let mut degraded = false;
 
     // 1. Vector search (semantic) with circuit breaker
-    let embedding_result = ctx.embedding_circuit.call(|| async {
-        ctx.embedder.embed_query(query).await.map_err(|e| anyhow::anyhow!(e))
-    }).await;
+    let embedding_result = ctx
+        .embedding_circuit
+        .call(|| async {
+            ctx.embedder
+                .embed_query(query)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))
+        })
+        .await;
 
     let path_filter_abs = path_filter.map(|p| resolve_path(&ctx.root_path, p));
 
     let vector_results = match embedding_result {
         Ok(embedding) => {
             // Try vector search with circuit breaker and path filter
-            match ctx.vector_circuit.call(|| async {
-                let lance = ctx.lance.lock().await;
-                lance.search_with_filter(&embedding, limit * 2, path_filter_abs.as_deref()).await.map_err(|e| anyhow::anyhow!(e))
-            }).await {
+            match ctx
+                .vector_circuit
+                .call(|| async {
+                    let lance = ctx.lance.lock().await;
+                    lance
+                        .search_with_filter(&embedding, limit * 2, path_filter_abs.as_deref())
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e))
+                })
+                .await
+            {
                 Ok(results) => results,
                 Err(e) => {
-                    tracing::warn!("Vector search failed: {}, falling back to keyword search", e);
+                    tracing::warn!(
+                        "Vector search failed: {}, falling back to keyword search",
+                        e
+                    );
                     warnings.push(format!("Vector search unavailable: {}", e));
                     degraded = true;
                     Vec::new()
@@ -94,7 +114,11 @@ pub async fn tool_search(args: Value, ctx: &ToolContext) -> Result<Value> {
         .map(|w| format!("\"{}\"", w.replace('"', "")))
         .collect::<Vec<_>>()
         .join(" OR ");
-    let fts_results = match ctx.sqlite.search_symbols_with_path_filter(&fts_query, (limit * 2) as i32, path_filter_abs.as_deref()).await {
+    let fts_results = match ctx
+        .sqlite
+        .search_symbols_with_path_filter(&fts_query, (limit * 2) as i32, path_filter_abs.as_deref())
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("FTS search failed (continuing with vector only): {}", e);
@@ -134,11 +158,7 @@ pub async fn tool_search(args: Value, ctx: &ToolContext) -> Result<Value> {
     for (rank, sym) in fts_results.iter().enumerate() {
         let key = (sym.file_path.clone(), sym.line as u32);
         let rrf = 1.0 / (K + rank as f64 + 1.0);
-        let content = sym
-            .signature
-            .as_deref()
-            .unwrap_or(&sym.name)
-            .to_string();
+        let content = sym.signature.as_deref().unwrap_or(&sym.name).to_string();
         scores
             .entry(key)
             .and_modify(|h| {
@@ -160,7 +180,11 @@ pub async fn tool_search(args: Value, ctx: &ToolContext) -> Result<Value> {
     }
 
     let mut fused: Vec<FusedHit> = scores.into_values().collect();
-    fused.sort_by(|a, b| b.rrf_score.partial_cmp(&a.rrf_score).unwrap_or(std::cmp::Ordering::Equal));
+    fused.sort_by(|a, b| {
+        b.rrf_score
+            .partial_cmp(&a.rrf_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     fused.truncate(limit * 2); // Keep extra for filtering
 
     // 4. Rerank if available
@@ -267,32 +291,32 @@ pub async fn tool_search(args: Value, ctx: &ToolContext) -> Result<Value> {
             if include_scores {
                 result.as_object_mut().unwrap().insert(
                     "score".to_string(),
-                    json!(format!("{:.3}", normalized_score))
+                    json!(format!("{:.3}", normalized_score)),
                 );
             }
 
             if include_scores || preview_mode {
                 if let Some(reason) = &match_reason {
-                    result.as_object_mut().unwrap().insert(
-                        "match_reason".to_string(),
-                        json!(reason)
-                    );
+                    result
+                        .as_object_mut()
+                        .unwrap()
+                        .insert("match_reason".to_string(), json!(reason));
                 }
             }
 
             if let Some(ctx_val) = context {
-                result.as_object_mut().unwrap().insert(
-                    "context".to_string(),
-                    json!(ctx_val)
-                );
+                result
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("context".to_string(), json!(ctx_val));
             }
 
             if preview_mode {
                 if let Some(prev) = preview {
-                    result.as_object_mut().unwrap().insert(
-                        "preview".to_string(),
-                        json!(prev)
-                    );
+                    result
+                        .as_object_mut()
+                        .unwrap()
+                        .insert("preview".to_string(), json!(prev));
                 }
             }
 
@@ -319,20 +343,22 @@ pub async fn tool_search(args: Value, ctx: &ToolContext) -> Result<Value> {
 
     // Add degraded mode information if applicable
     if degraded {
-        final_result.as_object_mut().unwrap().insert(
-            "degraded".to_string(),
-            json!(true)
-        );
-        final_result.as_object_mut().unwrap().insert(
-            "warnings".to_string(),
-            json!(warnings)
-        );
+        final_result
+            .as_object_mut()
+            .unwrap()
+            .insert("degraded".to_string(), json!(true));
+        final_result
+            .as_object_mut()
+            .unwrap()
+            .insert("warnings".to_string(), json!(warnings));
     }
 
     // NEW: Feature 008 - Store in cache (only if not degraded for best quality)
     if !degraded {
         if let Ok(result_json) = serde_json::to_string(&final_result) {
-            ctx.cache.put_search(query.to_string(), limit, result_json).await;
+            ctx.cache
+                .put_search(query.to_string(), limit, result_json)
+                .await;
         }
     }
 
@@ -363,7 +389,11 @@ pub async fn tool_cross_stack_search(args: Value, ctx: &ToolContext) -> Result<V
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|r| r.get("file_path").and_then(|v| v.as_str()).map(String::from))
+                .filter_map(|r| {
+                    r.get("file_path")
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -454,7 +484,8 @@ pub async fn tool_search_by_purpose(args: Value, ctx: &ToolContext) -> Result<Va
     let query_lower = query.to_lowercase();
     let keywords: Vec<&str> = query_lower.split_whitespace().collect();
 
-    let mut summary_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut summary_map: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     for s in &summaries {
         summary_map.insert(s.file_path.clone(), s.summary.clone());
 
@@ -500,7 +531,10 @@ pub async fn tool_search_by_purpose(args: Value, ctx: &ToolContext) -> Result<Va
 pub async fn tool_smart_file_selection(args: Value, ctx: &ToolContext) -> Result<Value> {
     let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
-    let min_score = args.get("min_score").and_then(|v| v.as_f64()).unwrap_or(0.3) as f32;
+    let min_score = args
+        .get("min_score")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.3) as f32;
 
     if query.is_empty() {
         return Err(goferError::InvalidParams("Query is required".into()).into());
@@ -529,7 +563,8 @@ pub async fn tool_smart_file_selection(args: Value, ctx: &ToolContext) -> Result
         let score = *file_scores.get(&hit.file_path).unwrap_or(&0.0);
         file_scores.insert(hit.file_path.clone(), score.max(hit.score));
 
-        file_chunks.entry(hit.file_path.clone())
+        file_chunks
+            .entry(hit.file_path.clone())
             .or_default()
             .push(hit.content.clone());
     }
@@ -542,13 +577,13 @@ pub async fn tool_smart_file_selection(args: Value, ctx: &ToolContext) -> Result
         // Get symbols in this file
         let symbols = match ctx.sqlite.get_symbols(Some(&file_path), None, 0, 500).await {
             Ok(syms) => syms,
-            Err(_) => Vec::new()
+            Err(_) => Vec::new(),
         };
 
         // Get file summary if available
         let summary = match ctx.sqlite.get_summary_by_path(&file_path).await {
             Ok(s) => s,
-            Err(_) => None
+            Err(_) => None,
         };
 
         // Get file metadata for scoring
@@ -574,38 +609,35 @@ pub async fn tool_smart_file_selection(args: Value, ctx: &ToolContext) -> Result
         );
 
         // Generate reasoning
-        let reason = generate_selection_reason_v2(
-            &scoring_details,
-            &symbols,
-            query
-        );
+        let reason = generate_selection_reason_v2(&scoring_details, &symbols, query);
 
         // Extract key symbols
-        let key_symbols: Vec<String> = symbols.iter()
-            .map(|s| s.name.clone())
-            .take(5)
-            .collect();
+        let key_symbols: Vec<String> = symbols.iter().map(|s| s.name.clone()).take(5).collect();
 
-        candidates.push((final_score, json!({
-            "path": make_relative(&ctx.root_path, &file_path),
-            "score": format!("{:.3}", final_score),
-            "reason": reason,
-            "summary": summary.and_then(|s| {
-                if s.summary.len() > 150 {
-                    Some(format!("{}...", &s.summary[..147]))
-                } else {
-                    Some(s.summary)
-                }
+        candidates.push((
+            final_score,
+            json!({
+                "path": make_relative(&ctx.root_path, &file_path),
+                "score": format!("{:.3}", final_score),
+                "reason": reason,
+                "summary": summary.and_then(|s| {
+                    if s.summary.len() > 150 {
+                        Some(format!("{}...", &s.summary[..147]))
+                    } else {
+                        Some(s.summary)
+                    }
+                }),
+                "key_symbols": key_symbols
             }),
-            "key_symbols": key_symbols
-        })));
+        ));
     }
 
     // Sort by score descending
     candidates.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
     // Filter by min_score and limit
-    let ranked_files: Vec<Value> = candidates.into_iter()
+    let ranked_files: Vec<Value> = candidates
+        .into_iter()
         .filter(|(score, _)| *score >= min_score)
         .take(limit)
         .map(|(_, file)| file)
@@ -613,7 +645,10 @@ pub async fn tool_smart_file_selection(args: Value, ctx: &ToolContext) -> Result
 
     // Generate overall reasoning
     let reasoning = if ranked_files.is_empty() {
-        format!("No files found matching query '{}' with score >= {}", query, min_score)
+        format!(
+            "No files found matching query '{}' with score >= {}",
+            query, min_score
+        )
     } else {
         format!("Found {} relevant files for '{}' using vector search, path analysis, and symbol matching",
             ranked_files.len(), query)
@@ -627,7 +662,9 @@ pub async fn tool_smart_file_selection(args: Value, ctx: &ToolContext) -> Result
 
     // Store in cache (using put_search as a substitute for put_file_selection)
     if let Ok(result_json) = serde_json::to_string(&result) {
-        ctx.cache.put_search(query.to_string(), limit, result_json).await;
+        ctx.cache
+            .put_search(query.to_string(), limit, result_json)
+            .await;
     }
 
     Ok(result)
@@ -643,19 +680,25 @@ fn determine_match_reason(hit: &FusedHit, query: &str) -> Option<String> {
     if let Some(ref symbol) = hit.matched_symbol {
         if symbol.to_lowercase().contains(&query_lower) {
             // Check symbol kind to be more specific
-            return Some(match hit.symbol_kind.as_ref() {
-                Some(SymbolKind::Function) => "FunctionName",
-                Some(SymbolKind::Struct) | Some(SymbolKind::Class) => "ClassName",
-                Some(SymbolKind::Enum) => "TypeDefinition",
-                Some(SymbolKind::Trait) | Some(SymbolKind::Interface) => "TypeDefinition",
-                _ => "SymbolName"
-            }.to_string());
+            return Some(
+                match hit.symbol_kind.as_ref() {
+                    Some(SymbolKind::Function) => "FunctionName",
+                    Some(SymbolKind::Struct) | Some(SymbolKind::Class) => "ClassName",
+                    Some(SymbolKind::Enum) => "TypeDefinition",
+                    Some(SymbolKind::Trait) | Some(SymbolKind::Interface) => "TypeDefinition",
+                    _ => "SymbolName",
+                }
+                .to_string(),
+            );
         }
     }
 
     // Check for doc comments
-    if hit.content.contains("///") || hit.content.contains("/**") || hit.content.contains("\"\"\"") {
-        let doc_start = hit.content.find("///")
+    if hit.content.contains("///") || hit.content.contains("/**") || hit.content.contains("\"\"\"")
+    {
+        let doc_start = hit
+            .content
+            .find("///")
             .or_else(|| hit.content.find("/**"))
             .or_else(|| hit.content.find("\"\"\""));
 
@@ -675,20 +718,22 @@ fn determine_match_reason(hit: &FusedHit, query: &str) -> Option<String> {
     }
 
     // Check for import statements
-    if (hit.content.contains("use ") ||
-       hit.content.contains("import ") ||
-       hit.content.contains("from "))
-       && content_lower.contains(&query_lower) {
+    if (hit.content.contains("use ")
+        || hit.content.contains("import ")
+        || hit.content.contains("from "))
+        && content_lower.contains(&query_lower)
+    {
         return Some("ImportStatement".to_string());
     }
 
     // Check if it's a type definition line
-    if (hit.content.contains("struct ") ||
-       hit.content.contains("enum ") ||
-       hit.content.contains("class ") ||
-       hit.content.contains("interface ") ||
-       hit.content.contains("type "))
-       && content_lower.contains(&query_lower) {
+    if (hit.content.contains("struct ")
+        || hit.content.contains("enum ")
+        || hit.content.contains("class ")
+        || hit.content.contains("interface ")
+        || hit.content.contains("type "))
+        && content_lower.contains(&query_lower)
+    {
         return Some("TypeDefinition".to_string());
     }
 
@@ -717,9 +762,15 @@ fn extract_context_from_content(content: &str) -> Option<String> {
 
         // Rust: pub fn name / fn name
         if let Some(pos) = trimmed.find(" fn ") {
-            if let Some(name_start) = trimmed[pos+4..].find(|c: char| c.is_alphanumeric() || c == '_') {
-                if let Some(name_end) = trimmed[pos+4+name_start..].find(|c: char| c == '(' || c == '<') {
-                    return Some(trimmed[pos+4+name_start..pos+4+name_start+name_end].to_string());
+            if let Some(name_start) =
+                trimmed[pos + 4..].find(|c: char| c.is_alphanumeric() || c == '_')
+            {
+                if let Some(name_end) =
+                    trimmed[pos + 4 + name_start..].find(|c: char| c == '(' || c == '<')
+                {
+                    return Some(
+                        trimmed[pos + 4 + name_start..pos + 4 + name_start + name_end].to_string(),
+                    );
                 }
             }
         }
@@ -734,8 +785,8 @@ fn extract_context_from_content(content: &str) -> Option<String> {
 
         if trimmed.contains("const ") && trimmed.contains(" = ") {
             if let Some(start) = trimmed.find("const ") {
-                if let Some(end) = trimmed[start+6..].find(" = ") {
-                    return Some(trimmed[start+6..start+6+end].trim().to_string());
+                if let Some(end) = trimmed[start + 6..].find(" = ") {
+                    return Some(trimmed[start + 6..start + 6 + end].trim().to_string());
                 }
             }
         }
@@ -750,8 +801,10 @@ fn extract_context_from_content(content: &str) -> Option<String> {
         // Classes
         if trimmed.contains("class ") {
             if let Some(start) = trimmed.find("class ") {
-                let after_class = &trimmed[start+6..];
-                if let Some(name_end) = after_class.find(|c: char| c == ' ' || c == '{' || c == '(' || c == '<') {
+                let after_class = &trimmed[start + 6..];
+                if let Some(name_end) =
+                    after_class.find(|c: char| c == ' ' || c == '{' || c == '(' || c == '<')
+                {
                     return Some(after_class[..name_end].trim().to_string());
                 }
             }
@@ -759,10 +812,16 @@ fn extract_context_from_content(content: &str) -> Option<String> {
 
         // Structs/Enums
         if trimmed.contains("struct ") || trimmed.contains("enum ") {
-            let keyword = if trimmed.contains("struct ") { "struct " } else { "enum " };
+            let keyword = if trimmed.contains("struct ") {
+                "struct "
+            } else {
+                "enum "
+            };
             if let Some(start) = trimmed.find(keyword) {
-                let after_keyword = &trimmed[start+keyword.len()..];
-                if let Some(name_end) = after_keyword.find(|c: char| c == ' ' || c == '{' || c == '<') {
+                let after_keyword = &trimmed[start + keyword.len()..];
+                if let Some(name_end) =
+                    after_keyword.find(|c: char| c == ' ' || c == '{' || c == '<')
+                {
                     return Some(after_keyword[..name_end].trim().to_string());
                 }
             }
@@ -784,7 +843,9 @@ async fn get_file_metadata(path: &str) -> FileMetadata {
     if let Ok(metadata) = tokio::fs::metadata(file_path).await {
         FileMetadata {
             size_bytes: metadata.len() as usize,
-            last_modified: metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH),
+            last_modified: metadata
+                .modified()
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH),
         }
     } else {
         FileMetadata {
@@ -833,11 +894,10 @@ fn calculate_relevance_score_v2(
     let size_penalty = calculate_size_penalty(file_metadata.size_bytes);
 
     // 4. Calculate base score
-    let base_score =
-        vector_score * weights.vector +
-        path_score * weights.path +
-        symbol_score * weights.symbols +
-        summary_score * weights.summary;
+    let base_score = vector_score * weights.vector
+        + path_score * weights.path
+        + symbol_score * weights.symbols
+        + summary_score * weights.summary;
 
     // 5. Apply modifiers
     let final_score = base_score * recency_boost * size_penalty;
@@ -861,30 +921,40 @@ fn calculate_adaptive_weights(query: &str) -> ScoringWeights {
     let query_lower = query.to_lowercase();
 
     // Pattern 1: "where is X defined?" -> prioritize symbols
-    if query_lower.contains("where") || query_lower.contains("defined") || query_lower.contains("find") {
+    if query_lower.contains("where")
+        || query_lower.contains("defined")
+        || query_lower.contains("find")
+    {
         return ScoringWeights {
             vector: 0.25,
             path: 0.15,
-            symbols: 0.50,  // Boost symbols
+            symbols: 0.50, // Boost symbols
             summary: 0.10,
         };
     }
 
     // Pattern 2: "how does X work?" -> prioritize summary
-    if query_lower.contains("how") || query_lower.contains("explain") || query_lower.contains("what") {
+    if query_lower.contains("how")
+        || query_lower.contains("explain")
+        || query_lower.contains("what")
+    {
         return ScoringWeights {
             vector: 0.35,
             path: 0.15,
             symbols: 0.15,
-            summary: 0.35,  // Boost summary
+            summary: 0.35, // Boost summary
         };
     }
 
     // Pattern 3: file path mentioned -> prioritize path
-    if query.contains("/") || query.contains(".rs") || query.contains(".ts") || query.contains(".js") {
+    if query.contains("/")
+        || query.contains(".rs")
+        || query.contains(".ts")
+        || query.contains(".js")
+    {
         return ScoringWeights {
             vector: 0.30,
-            path: 0.40,  // Boost path
+            path: 0.40, // Boost path
             symbols: 0.20,
             summary: 0.10,
         };
@@ -908,11 +978,11 @@ fn calculate_recency_boost(last_modified: std::time::SystemTime) -> f32 {
     let days_old = age.as_secs() / 86400;
 
     match days_old {
-        0..=1 => 1.15,    // Modified today/yesterday: +15%
-        2..=7 => 1.05,    // This week: +5%
-        8..=30 => 1.0,    // This month: no change
-        31..=90 => 0.95,  // Last 3 months: -5%
-        _ => 0.90,        // Older: -10%
+        0..=1 => 1.15,   // Modified today/yesterday: +15%
+        2..=7 => 1.05,   // This week: +5%
+        8..=30 => 1.0,   // This month: no change
+        31..=90 => 0.95, // Last 3 months: -5%
+        _ => 0.90,       // Older: -10%
     }
 }
 
@@ -934,9 +1004,7 @@ fn calculate_confidence(vector: f32, path: f32, symbol: f32) -> f32 {
     // High confidence if multiple signals agree
     let signals = [vector, path, symbol];
     let mean = signals.iter().sum::<f32>() / signals.len() as f32;
-    let variance = signals.iter()
-        .map(|&s| (s - mean).powi(2))
-        .sum::<f32>() / signals.len() as f32;
+    let variance = signals.iter().map(|&s| (s - mean).powi(2)).sum::<f32>() / signals.len() as f32;
 
     // Low variance = high confidence
     let confidence = 1.0 - variance.sqrt();
@@ -948,7 +1016,7 @@ fn calculate_confidence(vector: f32, path: f32, symbol: f32) -> f32 {
 fn generate_selection_reason_v2(
     details: &ScoringDetails,
     symbols: &[crate::models::chunk::SymbolWithPath],
-    _query: &str
+    _query: &str,
 ) -> String {
     let mut reasons: Vec<String> = Vec::new();
 
@@ -969,7 +1037,8 @@ fn generate_selection_reason_v2(
     // Symbol matching
     let symbol_component = details.base_score * details.weights.symbols;
     if symbol_component > 0.15 && !symbols.is_empty() {
-        let symbol_names = symbols.iter()
+        let symbol_names = symbols
+            .iter()
             .take(3)
             .map(|s| s.name.as_str())
             .collect::<Vec<_>>()
@@ -1035,7 +1104,11 @@ fn calculate_path_score_v2(query: &str, path: &str) -> f32 {
         let important_dirs = ["src", "lib", "core", "api", "components", "services"];
         for (idx, dir) in directories.iter().enumerate() {
             if dir.contains(&normalized_keyword) {
-                let importance = if important_dirs.contains(dir) { 1.2 } else { 1.0 };
+                let importance = if important_dirs.contains(dir) {
+                    1.2
+                } else {
+                    1.0
+                };
                 let proximity = 1.0 / (directories.len() - idx).max(1) as f32;
                 score += 0.15 * importance * proximity;
             }
@@ -1066,12 +1139,12 @@ fn normalize_keyword(word: &str) -> String {
 
 /// Calculate similarity ratio
 fn similarity_ratio(a: &str, b: &str) -> f32 {
-    let matches = a.chars()
-        .filter(|c| b.contains(*c))
-        .count();
+    let matches = a.chars().filter(|c| b.contains(*c)).count();
 
     let max_len = a.len().max(b.len());
-    if max_len == 0 { return 1.0; }
+    if max_len == 0 {
+        return 1.0;
+    }
 
     matches as f32 / max_len as f32
 }
@@ -1083,8 +1156,12 @@ fn edit_distance(a: &str, b: &str) -> usize {
     let a_len = a_chars.len();
     let b_len = b_chars.len();
 
-    if a_len == 0 { return b_len; }
-    if b_len == 0 { return a_len; }
+    if a_len == 0 {
+        return b_len;
+    }
+    if b_len == 0 {
+        return a_len;
+    }
 
     let mut matrix = vec![vec![0; b_len + 1]; a_len + 1];
 
@@ -1097,12 +1174,19 @@ fn edit_distance(a: &str, b: &str) -> usize {
 
     for i in 1..=a_len {
         for j in 1..=b_len {
-            let cost = if a_chars[i-1] == b_chars[j-1] { 0 } else { 1 };
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
             matrix[i][j] = *[
-                matrix[i-1][j] + 1,      // deletion
-                matrix[i][j-1] + 1,      // insertion
-                matrix[i-1][j-1] + cost, // substitution
-            ].iter().min().unwrap();
+                matrix[i - 1][j] + 1,        // deletion
+                matrix[i][j - 1] + 1,        // insertion
+                matrix[i - 1][j - 1] + cost, // substitution
+            ]
+            .iter()
+            .min()
+            .unwrap();
         }
     }
 
@@ -1124,7 +1208,12 @@ fn calculate_path_score(query: &str, path: &str) -> f32 {
         // Check path components
         if path_lower.contains(keyword) {
             // Higher score for filename match vs directory
-            if path_lower.split('/').next_back().unwrap_or("").contains(keyword) {
+            if path_lower
+                .split('/')
+                .next_back()
+                .unwrap_or("")
+                .contains(keyword)
+            {
                 score += 0.3;
             } else {
                 score += 0.1;
@@ -1182,7 +1271,7 @@ fn generate_selection_reason(
     symbol_score: f32,
     summary_score: f32,
     symbols: &[crate::models::chunk::SymbolWithPath],
-    _query: &str
+    _query: &str,
 ) -> String {
     let mut reasons: Vec<String> = Vec::new();
 
@@ -1197,7 +1286,8 @@ fn generate_selection_reason(
     }
 
     if symbol_score > 0.5 && !symbols.is_empty() {
-        let symbol_names = symbols.iter()
+        let symbol_names = symbols
+            .iter()
             .take(3)
             .map(|s| s.name.as_str())
             .collect::<Vec<_>>()

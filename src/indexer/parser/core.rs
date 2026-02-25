@@ -1,11 +1,11 @@
+use regex::Regex;
 use streaming_iterator::StreamingIterator;
 use thiserror::Error;
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, Tree};
-use regex::Regex;
 
-use crate::models::{CodeChunk, ImportInfo, Symbol, SymbolReference};
-use crate::models::chunk::SymbolKind;
 use super::chunking::smart_chunk_from_root;
+use crate::models::chunk::SymbolKind;
+use crate::models::{CodeChunk, ImportInfo, Symbol, SymbolReference};
 
 /// Result of a single-pass file parse: symbols, chunks, references, and imports.
 #[derive(Default)]
@@ -55,7 +55,9 @@ impl SupportedLanguage {
     pub(crate) fn tree_sitter_language(&self) -> Language {
         match self {
             Self::Rust => tree_sitter_rust::LANGUAGE.into(),
-            Self::TypeScript | Self::JavaScript | Self::Vue => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            Self::TypeScript | Self::JavaScript | Self::Vue => {
+                tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
+            }
             Self::Python => tree_sitter_python::LANGUAGE.into(),
             Self::Go => tree_sitter_go::LANGUAGE.into(),
         }
@@ -420,7 +422,8 @@ impl CodeParser {
                             for j in 0..child.child_count() {
                                 if let Some(inner) = child.child(j) {
                                     if inner.kind() == "raw_text" {
-                                        let script_content = inner.utf8_text(content.as_bytes()).ok()?.to_string();
+                                        let script_content =
+                                            inner.utf8_text(content.as_bytes()).ok()?.to_string();
                                         let line_offset = inner.start_position().row as u32;
                                         return Some((script_content, line_offset));
                                     }
@@ -446,11 +449,16 @@ impl CodeParser {
     }
 
     /// Parse a file and extract symbols
-    pub fn parse_symbols(&mut self, content: &str, language: SupportedLanguage) -> Result<Vec<Symbol>> {
+    pub fn parse_symbols(
+        &mut self,
+        content: &str,
+        language: SupportedLanguage,
+    ) -> Result<Vec<Symbol>> {
         // For Vue files, extract script and parse as TypeScript
         if language == SupportedLanguage::Vue {
             if let Some((script_content, line_offset)) = self.extract_vue_script(content) {
-                let mut symbols = self.parse_symbols_internal(&script_content, SupportedLanguage::TypeScript)?;
+                let mut symbols =
+                    self.parse_symbols_internal(&script_content, SupportedLanguage::TypeScript)?;
                 // Adjust line numbers to account for script position in Vue file
                 for symbol in &mut symbols {
                     symbol.line_start += line_offset as i32;
@@ -460,11 +468,15 @@ impl CodeParser {
             }
             return Ok(Vec::new());
         }
-        
+
         self.parse_symbols_internal(content, language)
     }
 
-    fn parse_symbols_internal(&mut self, content: &str, language: SupportedLanguage) -> Result<Vec<Symbol>> {
+    fn parse_symbols_internal(
+        &mut self,
+        content: &str,
+        language: SupportedLanguage,
+    ) -> Result<Vec<Symbol>> {
         self.parser
             .set_language(&language.tree_sitter_language())
             .map_err(|_| ParserError::UnsupportedLanguage(format!("{:?}", language)))?;
@@ -549,11 +561,20 @@ impl CodeParser {
     }
 
     /// Parse a file and extract code chunks for embedding
-    pub fn parse_chunks(&mut self, content: &str, file_path: &str, language: SupportedLanguage) -> Result<Vec<CodeChunk>> {
+    pub fn parse_chunks(
+        &mut self,
+        content: &str,
+        file_path: &str,
+        language: SupportedLanguage,
+    ) -> Result<Vec<CodeChunk>> {
         // For Vue files, extract script and parse as TypeScript
         if language == SupportedLanguage::Vue {
             if let Some((script_content, line_offset)) = self.extract_vue_script(content) {
-                let mut chunks = self.parse_chunks_internal(&script_content, file_path, SupportedLanguage::TypeScript)?;
+                let mut chunks = self.parse_chunks_internal(
+                    &script_content,
+                    file_path,
+                    SupportedLanguage::TypeScript,
+                )?;
                 // Adjust line numbers
                 for chunk in &mut chunks {
                     chunk.line_start += line_offset;
@@ -563,11 +584,16 @@ impl CodeParser {
             }
             return Ok(Vec::new());
         }
-        
+
         self.parse_chunks_internal(content, file_path, language)
     }
 
-    fn parse_chunks_internal(&mut self, content: &str, file_path: &str, language: SupportedLanguage) -> Result<Vec<CodeChunk>> {
+    fn parse_chunks_internal(
+        &mut self,
+        content: &str,
+        file_path: &str,
+        language: SupportedLanguage,
+    ) -> Result<Vec<CodeChunk>> {
         self.parser
             .set_language(&language.tree_sitter_language())
             .map_err(|_| ParserError::UnsupportedLanguage(format!("{:?}", language)))?;
@@ -639,7 +665,11 @@ impl CodeParser {
                     line_start,
                     line_end,
                     symbol_name: if name.is_empty() { None } else { Some(name) },
-                    symbol_kind: if kind.is_empty() { None } else { Some(SymbolKind::from_str(&kind)) },
+                    symbol_kind: if kind.is_empty() {
+                        None
+                    } else {
+                        Some(SymbolKind::from_str(&kind))
+                    },
                     symbol_path: None,
                     scopes: Vec::new(),
                 });
@@ -650,14 +680,19 @@ impl CodeParser {
     }
 
     /// Parse a file and extract references (function calls, imports, type usages)
-    pub fn parse_references(&mut self, content: &str, language: SupportedLanguage) -> Result<Vec<SymbolReference>> {
+    pub fn parse_references(
+        &mut self,
+        content: &str,
+        language: SupportedLanguage,
+    ) -> Result<Vec<SymbolReference>> {
         // For Vue files, extract script and parse as TypeScript
         if language == SupportedLanguage::Vue {
             let mut all_refs = Vec::new();
 
             // Script references
             if let Some((script_content, line_offset)) = self.extract_vue_script(content) {
-                let mut refs = self.parse_references_internal(&script_content, SupportedLanguage::TypeScript)?;
+                let mut refs =
+                    self.parse_references_internal(&script_content, SupportedLanguage::TypeScript)?;
                 for r in &mut refs {
                     r.line += line_offset as i32;
                 }
@@ -669,7 +704,7 @@ impl CodeParser {
 
             return Ok(all_refs);
         }
-        
+
         self.parse_references_internal(content, language)
     }
 
@@ -699,7 +734,8 @@ impl CodeParser {
                         if let Ok(tag_name) = tag_name_node.utf8_text(content.as_bytes()) {
                             // Custom components: PascalCase or contains hyphen (kebab-case)
                             let is_custom = tag_name.contains('-')
-                                || (tag_name.len() > 1 && tag_name.chars().next().is_some_and(|c| c.is_uppercase()));
+                                || (tag_name.len() > 1
+                                    && tag_name.chars().next().is_some_and(|c| c.is_uppercase()));
 
                             if is_custom {
                                 refs.push(SymbolReference {
@@ -727,7 +763,11 @@ impl CodeParser {
         refs
     }
 
-    fn parse_references_internal(&mut self, content: &str, language: SupportedLanguage) -> Result<Vec<SymbolReference>> {
+    fn parse_references_internal(
+        &mut self,
+        content: &str,
+        language: SupportedLanguage,
+    ) -> Result<Vec<SymbolReference>> {
         self.parser
             .set_language(&language.tree_sitter_language())
             .map_err(|_| ParserError::UnsupportedLanguage(format!("{:?}", language)))?;
@@ -737,8 +777,11 @@ impl CodeParser {
             .parse(content, None)
             .ok_or(ParserError::ParseError)?;
 
-        let query = Query::new(&language.tree_sitter_language(), language.refs_query_string())
-            .map_err(|e| ParserError::QueryError(e.message.to_string()))?;
+        let query = Query::new(
+            &language.tree_sitter_language(),
+            language.refs_query_string(),
+        )
+        .map_err(|e| ParserError::QueryError(e.message.to_string()))?;
 
         let mut cursor = QueryCursor::new();
         let mut refs = Vec::new();
@@ -791,7 +834,8 @@ impl CodeParser {
         match language {
             SupportedLanguage::Vue => {
                 if let Some((script, line_offset)) = self.extract_vue_script(content) {
-                    let mut imports = self.parse_imports_internal(&script, SupportedLanguage::TypeScript);
+                    let mut imports =
+                        self.parse_imports_internal(&script, SupportedLanguage::TypeScript);
                     for imp in &mut imports {
                         imp.line += line_offset;
                     }
@@ -804,7 +848,11 @@ impl CodeParser {
         }
     }
 
-    fn parse_imports_internal(&mut self, content: &str, language: SupportedLanguage) -> Vec<ImportInfo> {
+    fn parse_imports_internal(
+        &mut self,
+        content: &str,
+        language: SupportedLanguage,
+    ) -> Vec<ImportInfo> {
         let lang = language.tree_sitter_language();
         if self.parser.set_language(&lang).is_err() {
             return Vec::new();
@@ -820,9 +868,9 @@ impl CodeParser {
 
         match language {
             SupportedLanguage::Rust => Self::collect_rust_imports(root, code),
-            SupportedLanguage::TypeScript | SupportedLanguage::JavaScript | SupportedLanguage::Vue => {
-                Self::collect_ts_imports(root, code)
-            }
+            SupportedLanguage::TypeScript
+            | SupportedLanguage::JavaScript
+            | SupportedLanguage::Vue => Self::collect_ts_imports(root, code),
             SupportedLanguage::Python => Self::collect_python_imports(root, code),
             SupportedLanguage::Go => Self::collect_go_imports(root, code),
         }
@@ -868,7 +916,9 @@ impl CodeParser {
                 let full = path_parts.join("::");
                 if !full.starts_with("std::") && !full.starts_with("core::") {
                     let item = text.to_string();
-                    let is_rel = full.starts_with("crate") || full.starts_with("super") || full.starts_with("self");
+                    let is_rel = full.starts_with("crate")
+                        || full.starts_with("super")
+                        || full.starts_with("self");
                     out.push(ImportInfo {
                         path: full,
                         items: vec![item],
@@ -885,8 +935,12 @@ impl CodeParser {
                 if !full.starts_with("std::") && !full.starts_with("core::") {
                     let item = name_node
                         .and_then(|n| n.utf8_text(code).ok())
-                        .unwrap_or_else(|| path_node.and_then(|n| n.utf8_text(code).ok()).unwrap_or(""));
-                    let is_rel = full.starts_with("crate") || full.starts_with("super") || full.starts_with("self");
+                        .unwrap_or_else(|| {
+                            path_node.and_then(|n| n.utf8_text(code).ok()).unwrap_or("")
+                        });
+                    let is_rel = full.starts_with("crate")
+                        || full.starts_with("super")
+                        || full.starts_with("self");
                     out.push(ImportInfo {
                         path: full,
                         items: vec![item.to_string()],
@@ -931,7 +985,9 @@ impl CodeParser {
                 if let Some(path_node) = node.child_by_field_name("path") {
                     let full = path_node.utf8_text(code).unwrap_or("").to_string();
                     if !full.starts_with("std::") && !full.starts_with("core::") {
-                        let is_rel = full.starts_with("crate") || full.starts_with("super") || full.starts_with("self");
+                        let is_rel = full.starts_with("crate")
+                            || full.starts_with("super")
+                            || full.starts_with("self");
                         out.push(ImportInfo {
                             path: format!("{}::*", full),
                             items: vec!["*".to_string()],
@@ -1061,7 +1117,8 @@ impl CodeParser {
                             let raw = name_node.utf8_text(code).unwrap_or("");
                             // aliased_import: `import foo as f` — take the dotted_name
                             let path = if name_node.kind() == "aliased_import" {
-                                name_node.child_by_field_name("name")
+                                name_node
+                                    .child_by_field_name("name")
                                     .and_then(|n| n.utf8_text(code).ok())
                                     .unwrap_or(raw)
                             } else {
@@ -1084,7 +1141,8 @@ impl CodeParser {
                     let line = child.start_position().row as u32;
 
                     // module_name: can be dotted_name or relative_import
-                    let module = child.child_by_field_name("module_name")
+                    let module = child
+                        .child_by_field_name("module_name")
                         .and_then(|n| n.utf8_text(code).ok())
                         .unwrap_or("");
 
@@ -1097,8 +1155,12 @@ impl CodeParser {
                             match n.kind() {
                                 "dotted_name" | "identifier" => {
                                     // Skip the module_name node (it appears before "import")
-                                    if n.start_byte() > child.child_by_field_name("module_name")
-                                        .map(|m| m.end_byte()).unwrap_or(0) {
+                                    if n.start_byte()
+                                        > child
+                                            .child_by_field_name("module_name")
+                                            .map(|m| m.end_byte())
+                                            .unwrap_or(0)
+                                    {
                                         let t = n.utf8_text(code).unwrap_or("");
                                         if !t.is_empty() {
                                             items.push(t.to_string());
@@ -1106,7 +1168,8 @@ impl CodeParser {
                                     }
                                 }
                                 "aliased_import" => {
-                                    let name = n.child_by_field_name("name")
+                                    let name = n
+                                        .child_by_field_name("name")
                                         .and_then(|nm| nm.utf8_text(code).ok())
                                         .unwrap_or("");
                                     if !name.is_empty() {
@@ -1131,11 +1194,18 @@ impl CodeParser {
                     }
                 }
                 // Recurse into decorated_definition, if_statement, etc. where imports may appear
-                _ if child.named_child_count() > 0 && matches!(
-                    child.kind(),
-                    "if_statement" | "try_statement" | "block" | "except_clause"
-                    | "with_statement" | "function_definition" | "module"
-                ) => {
+                _ if child.named_child_count() > 0
+                    && matches!(
+                        child.kind(),
+                        "if_statement"
+                            | "try_statement"
+                            | "block"
+                            | "except_clause"
+                            | "with_statement"
+                            | "function_definition"
+                            | "module"
+                    ) =>
+                {
                     Self::walk_python_imports(child, code, out);
                 }
                 _ => {}
@@ -1224,7 +1294,10 @@ impl CodeParser {
             .map_err(|_| ParserError::UnsupportedLanguage(format!("{:?}", language)))?;
 
         // === Single parse ===
-        let tree = self.parser.parse(content, self.old_tree.as_ref()).ok_or(ParserError::ParseError)?;
+        let tree = self
+            .parser
+            .parse(content, self.old_tree.as_ref())
+            .ok_or(ParserError::ParseError)?;
         let root = tree.root_node();
         let code = content.as_bytes();
 
@@ -1234,8 +1307,10 @@ impl CodeParser {
         let symbols = Self::extract_symbols_from_tree(root, content, &sym_query);
 
         // 2. Smart chunks from tree walk (preferred), fallback to query-based chunks
-        let chunks = smart_chunk_from_root(root, content, file_path, language)
-            .unwrap_or_else(|_| Self::extract_chunks_from_tree(root, content, file_path, &sym_query));
+        let chunks =
+            smart_chunk_from_root(root, content, file_path, language).unwrap_or_else(|_| {
+                Self::extract_chunks_from_tree(root, content, file_path, &sym_query)
+            });
 
         // 3. References — via refs query
         let refs_query = Query::new(&lang, language.refs_query_string())
@@ -1253,7 +1328,12 @@ impl CodeParser {
             SupportedLanguage::Vue => Vec::new(), // handled above
         };
 
-        Ok(ParsedFile { symbols, chunks, refs, imports })
+        Ok(ParsedFile {
+            symbols,
+            chunks,
+            refs,
+            imports,
+        })
     }
 
     fn parse_vue_file(&mut self, content: &str, file_path: &str) -> Result<ParsedFile> {
@@ -1293,11 +1373,7 @@ impl CodeParser {
 
     // --- Static extractors that work on a pre-parsed tree ---
 
-    fn extract_symbols_from_tree(
-        root: Node<'_>,
-        content: &str,
-        query: &Query,
-    ) -> Vec<Symbol> {
+    fn extract_symbols_from_tree(root: Node<'_>, content: &str, query: &Query) -> Vec<Symbol> {
         let mut cursor = QueryCursor::new();
         let mut symbols = Vec::new();
         let capture_names = query.capture_names();
@@ -1394,7 +1470,11 @@ impl CodeParser {
                     line_start,
                     line_end,
                     symbol_name: if name.is_empty() { None } else { Some(name) },
-                    symbol_kind: if kind.is_empty() { None } else { Some(SymbolKind::from_str(&kind)) },
+                    symbol_kind: if kind.is_empty() {
+                        None
+                    } else {
+                        Some(SymbolKind::from_str(&kind))
+                    },
                     symbol_path: None,
                     scopes: Vec::new(),
                 });
@@ -1496,14 +1576,38 @@ mod tests {
 
     #[test]
     fn test_supported_language_from_extension() {
-        assert_eq!(SupportedLanguage::from_extension("rs"), Some(SupportedLanguage::Rust));
-        assert_eq!(SupportedLanguage::from_extension("ts"), Some(SupportedLanguage::TypeScript));
-        assert_eq!(SupportedLanguage::from_extension("tsx"), Some(SupportedLanguage::TypeScript));
-        assert_eq!(SupportedLanguage::from_extension("js"), Some(SupportedLanguage::JavaScript));
-        assert_eq!(SupportedLanguage::from_extension("jsx"), Some(SupportedLanguage::JavaScript));
-        assert_eq!(SupportedLanguage::from_extension("vue"), Some(SupportedLanguage::Vue));
-        assert_eq!(SupportedLanguage::from_extension("py"), Some(SupportedLanguage::Python));
-        assert_eq!(SupportedLanguage::from_extension("go"), Some(SupportedLanguage::Go));
+        assert_eq!(
+            SupportedLanguage::from_extension("rs"),
+            Some(SupportedLanguage::Rust)
+        );
+        assert_eq!(
+            SupportedLanguage::from_extension("ts"),
+            Some(SupportedLanguage::TypeScript)
+        );
+        assert_eq!(
+            SupportedLanguage::from_extension("tsx"),
+            Some(SupportedLanguage::TypeScript)
+        );
+        assert_eq!(
+            SupportedLanguage::from_extension("js"),
+            Some(SupportedLanguage::JavaScript)
+        );
+        assert_eq!(
+            SupportedLanguage::from_extension("jsx"),
+            Some(SupportedLanguage::JavaScript)
+        );
+        assert_eq!(
+            SupportedLanguage::from_extension("vue"),
+            Some(SupportedLanguage::Vue)
+        );
+        assert_eq!(
+            SupportedLanguage::from_extension("py"),
+            Some(SupportedLanguage::Python)
+        );
+        assert_eq!(
+            SupportedLanguage::from_extension("go"),
+            Some(SupportedLanguage::Go)
+        );
         assert_eq!(SupportedLanguage::from_extension("txt"), None);
         assert_eq!(SupportedLanguage::from_extension(""), None);
     }
@@ -1515,16 +1619,16 @@ mod tests {
         assert!(is_primitive_or_keyword("String"));
         assert!(is_primitive_or_keyword("Vec"));
         assert!(is_primitive_or_keyword("Option"));
-        
+
         // TypeScript primitives
         assert!(is_primitive_or_keyword("string"));
         assert!(is_primitive_or_keyword("number"));
         assert!(is_primitive_or_keyword("Promise"));
-        
+
         // Go primitives
         assert!(is_primitive_or_keyword("int"));
         assert!(is_primitive_or_keyword("error"));
-        
+
         // Custom names should not match
         assert!(!is_primitive_or_keyword("MyStruct"));
         assert!(!is_primitive_or_keyword("process_data"));
@@ -1591,8 +1695,12 @@ impl User {
 "#;
         let symbols = parser.parse_symbols(code, SupportedLanguage::Rust).unwrap();
         // Should capture impl block and the function inside
-        assert!(symbols.iter().any(|s| s.name == "User" && s.kind == crate::models::chunk::SymbolKind::Impl));
-        assert!(symbols.iter().any(|s| s.name == "new" && s.kind == crate::models::chunk::SymbolKind::Function));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "User" && s.kind == crate::models::chunk::SymbolKind::Impl));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "new" && s.kind == crate::models::chunk::SymbolKind::Function));
     }
 
     #[test]
@@ -1604,7 +1712,9 @@ trait Printable {
 }
 "#;
         let symbols = parser.parse_symbols(code, SupportedLanguage::Rust).unwrap();
-        assert!(symbols.iter().any(|s| s.name == "Printable" && s.kind == crate::models::chunk::SymbolKind::Trait));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "Printable" && s.kind == crate::models::chunk::SymbolKind::Trait));
     }
 
     #[test]
@@ -1616,15 +1726,19 @@ use crate::models::User;
 use super::utils::helper;
 "#;
         let imports = parser.parse_imports(code, SupportedLanguage::Rust);
-        
+
         // std:: should be filtered out
         assert!(imports.iter().all(|i| !i.path.starts_with("std::")));
-        
+
         // crate:: should be present and marked as relative
-        assert!(imports.iter().any(|i| i.path.contains("crate") && i.is_relative));
-        
+        assert!(imports
+            .iter()
+            .any(|i| i.path.contains("crate") && i.is_relative));
+
         // super:: should be present and marked as relative
-        assert!(imports.iter().any(|i| i.path.contains("super") && i.is_relative));
+        assert!(imports
+            .iter()
+            .any(|i| i.path.contains("super") && i.is_relative));
     }
 
     #[test]
@@ -1637,14 +1751,22 @@ fn process() {
     println!("Done");
 }
 "#;
-        let refs = parser.parse_references(code, SupportedLanguage::Rust).unwrap();
-        
+        let refs = parser
+            .parse_references(code, SupportedLanguage::Rust)
+            .unwrap();
+
         // Should find calls to User::new and user.save
-        assert!(refs.iter().any(|r| r.target_name == "new" && r.kind == "call"));
-        assert!(refs.iter().any(|r| r.target_name == "save" && r.kind == "call"));
-        
+        assert!(refs
+            .iter()
+            .any(|r| r.target_name == "new" && r.kind == "call"));
+        assert!(refs
+            .iter()
+            .any(|r| r.target_name == "save" && r.kind == "call"));
+
         // println! is a macro call
-        assert!(refs.iter().any(|r| r.target_name == "println" && r.kind == "call"));
+        assert!(refs
+            .iter()
+            .any(|r| r.target_name == "println" && r.kind == "call"));
     }
 
     // -------------------------------------------------------------------------
@@ -1659,8 +1781,12 @@ function greet(name: string): string {
     return `Hello, ${name}!`;
 }
 "#;
-        let symbols = parser.parse_symbols(code, SupportedLanguage::TypeScript).unwrap();
-        assert!(symbols.iter().any(|s| s.name == "greet" && s.kind == crate::models::chunk::SymbolKind::Function));
+        let symbols = parser
+            .parse_symbols(code, SupportedLanguage::TypeScript)
+            .unwrap();
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "greet" && s.kind == crate::models::chunk::SymbolKind::Function));
     }
 
     #[test]
@@ -1675,9 +1801,15 @@ class UserService {
     }
 }
 "#;
-        let symbols = parser.parse_symbols(code, SupportedLanguage::TypeScript).unwrap();
-        assert!(symbols.iter().any(|s| s.name == "UserService" && s.kind == crate::models::chunk::SymbolKind::Class));
-        assert!(symbols.iter().any(|s| s.name == "getUser" && s.kind == crate::models::chunk::SymbolKind::Method));
+        let symbols = parser
+            .parse_symbols(code, SupportedLanguage::TypeScript)
+            .unwrap();
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "UserService" && s.kind == crate::models::chunk::SymbolKind::Class));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "getUser" && s.kind == crate::models::chunk::SymbolKind::Method));
     }
 
     #[test]
@@ -1690,8 +1822,12 @@ interface User {
     email?: string;
 }
 "#;
-        let symbols = parser.parse_symbols(code, SupportedLanguage::TypeScript).unwrap();
-        assert!(symbols.iter().any(|s| s.name == "User" && s.kind == crate::models::chunk::SymbolKind::Interface));
+        let symbols = parser
+            .parse_symbols(code, SupportedLanguage::TypeScript)
+            .unwrap();
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "User" && s.kind == crate::models::chunk::SymbolKind::Interface));
     }
 
     #[test]
@@ -1702,7 +1838,9 @@ const processUser = (user: User): void => {
     console.log(user.name);
 };
 "#;
-        let symbols = parser.parse_symbols(code, SupportedLanguage::TypeScript).unwrap();
+        let symbols = parser
+            .parse_symbols(code, SupportedLanguage::TypeScript)
+            .unwrap();
         assert!(symbols.iter().any(|s| s.name == "processUser"));
     }
 
@@ -1715,13 +1853,15 @@ import axios from 'axios';
 import * as utils from '../utils';
 "#;
         let imports = parser.parse_imports(code, SupportedLanguage::TypeScript);
-        
+
         // Relative import
-        assert!(imports.iter().any(|i| i.path == "./models" && i.is_relative));
-        
+        assert!(imports
+            .iter()
+            .any(|i| i.path == "./models" && i.is_relative));
+
         // Package import
         assert!(imports.iter().any(|i| i.path == "axios" && !i.is_relative));
-        
+
         // Named imports
         let models_import = imports.iter().find(|i| i.path == "./models").unwrap();
         assert!(models_import.items.contains(&"User".to_string()));
@@ -1738,11 +1878,19 @@ function test() {
     processData(user);
 }
 "#;
-        let refs = parser.parse_references(code, SupportedLanguage::TypeScript).unwrap();
-        
-        assert!(refs.iter().any(|r| r.target_name == "User" && r.kind == "call"));
-        assert!(refs.iter().any(|r| r.target_name == "save" && r.kind == "call"));
-        assert!(refs.iter().any(|r| r.target_name == "processData" && r.kind == "call"));
+        let refs = parser
+            .parse_references(code, SupportedLanguage::TypeScript)
+            .unwrap();
+
+        assert!(refs
+            .iter()
+            .any(|r| r.target_name == "User" && r.kind == "call"));
+        assert!(refs
+            .iter()
+            .any(|r| r.target_name == "save" && r.kind == "call"));
+        assert!(refs
+            .iter()
+            .any(|r| r.target_name == "processData" && r.kind == "call"));
     }
 
     // -------------------------------------------------------------------------
@@ -1756,8 +1904,12 @@ function test() {
 def hello_world():
     print("Hello!")
 "#;
-        let symbols = parser.parse_symbols(code, SupportedLanguage::Python).unwrap();
-        assert!(symbols.iter().any(|s| s.name == "hello_world" && s.kind == crate::models::chunk::SymbolKind::Function));
+        let symbols = parser
+            .parse_symbols(code, SupportedLanguage::Python)
+            .unwrap();
+        assert!(symbols.iter().any(
+            |s| s.name == "hello_world" && s.kind == crate::models::chunk::SymbolKind::Function
+        ));
     }
 
     #[test]
@@ -1771,8 +1923,12 @@ class UserService:
     def get_user(self, user_id: int) -> User:
         return self.db.find(user_id)
 "#;
-        let symbols = parser.parse_symbols(code, SupportedLanguage::Python).unwrap();
-        assert!(symbols.iter().any(|s| s.name == "UserService" && s.kind == crate::models::chunk::SymbolKind::Class));
+        let symbols = parser
+            .parse_symbols(code, SupportedLanguage::Python)
+            .unwrap();
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "UserService" && s.kind == crate::models::chunk::SymbolKind::Class));
         assert!(symbols.iter().any(|s| s.name == "__init__"));
         assert!(symbols.iter().any(|s| s.name == "get_user"));
     }
@@ -1785,7 +1941,9 @@ class UserService:
 def get_users():
     return jsonify(users)
 "#;
-        let symbols = parser.parse_symbols(code, SupportedLanguage::Python).unwrap();
+        let symbols = parser
+            .parse_symbols(code, SupportedLanguage::Python)
+            .unwrap();
         assert!(symbols.iter().any(|s| s.name == "get_users"));
     }
 
@@ -1799,15 +1957,17 @@ from .models import User
 from ..utils import helper
 "#;
         let imports = parser.parse_imports(code, SupportedLanguage::Python);
-        
+
         // Absolute import
         assert!(imports.iter().any(|i| i.path == "os" && !i.is_relative));
-        
+
         // From import
         assert!(imports.iter().any(|i| i.path == "typing"));
-        
+
         // Relative imports
-        assert!(imports.iter().any(|i| i.path.starts_with('.') && i.is_relative));
+        assert!(imports
+            .iter()
+            .any(|i| i.path.starts_with('.') && i.is_relative));
     }
 
     #[test]
@@ -1819,10 +1979,16 @@ def process():
     user.save()
     print("Done")
 "#;
-        let refs = parser.parse_references(code, SupportedLanguage::Python).unwrap();
-        
-        assert!(refs.iter().any(|r| r.target_name == "create" && r.kind == "call"));
-        assert!(refs.iter().any(|r| r.target_name == "save" && r.kind == "call"));
+        let refs = parser
+            .parse_references(code, SupportedLanguage::Python)
+            .unwrap();
+
+        assert!(refs
+            .iter()
+            .any(|r| r.target_name == "create" && r.kind == "call"));
+        assert!(refs
+            .iter()
+            .any(|r| r.target_name == "save" && r.kind == "call"));
     }
 
     // -------------------------------------------------------------------------
@@ -1840,7 +2006,9 @@ func HelloWorld() {
 }
 "#;
         let symbols = parser.parse_symbols(code, SupportedLanguage::Go).unwrap();
-        assert!(symbols.iter().any(|s| s.name == "HelloWorld" && s.kind == crate::models::chunk::SymbolKind::Function));
+        assert!(symbols.iter().any(
+            |s| s.name == "HelloWorld" && s.kind == crate::models::chunk::SymbolKind::Function
+        ));
     }
 
     #[test]
@@ -1855,7 +2023,9 @@ type User struct {
 }
 "#;
         let symbols = parser.parse_symbols(code, SupportedLanguage::Go).unwrap();
-        assert!(symbols.iter().any(|s| s.name == "User" && s.kind == crate::models::chunk::SymbolKind::Struct));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "User" && s.kind == crate::models::chunk::SymbolKind::Struct));
     }
 
     #[test]
@@ -1870,7 +2040,10 @@ type UserRepository interface {
 }
 "#;
         let symbols = parser.parse_symbols(code, SupportedLanguage::Go).unwrap();
-        assert!(symbols.iter().any(|s| s.name == "UserRepository" && s.kind == crate::models::chunk::SymbolKind::Interface));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "UserRepository"
+                && s.kind == crate::models::chunk::SymbolKind::Interface));
     }
 
     #[test]
@@ -1884,7 +2057,9 @@ func (u *User) FullName() string {
 }
 "#;
         let symbols = parser.parse_symbols(code, SupportedLanguage::Go).unwrap();
-        assert!(symbols.iter().any(|s| s.name == "FullName" && s.kind == crate::models::chunk::SymbolKind::Method));
+        assert!(symbols
+            .iter()
+            .any(|s| s.name == "FullName" && s.kind == crate::models::chunk::SymbolKind::Method));
     }
 
     #[test]
@@ -1900,7 +2075,7 @@ import (
 )
 "#;
         let imports = parser.parse_imports(code, SupportedLanguage::Go);
-        
+
         assert!(imports.iter().any(|i| i.path == "fmt"));
         assert!(imports.iter().any(|i| i.path == "github.com/gin-gonic/gin"));
     }
@@ -1969,11 +2144,17 @@ export default {
 }
 </script>
 "#;
-        let refs = parser.parse_references(code, SupportedLanguage::Vue).unwrap();
-        
+        let refs = parser
+            .parse_references(code, SupportedLanguage::Vue)
+            .unwrap();
+
         // Should detect component usage in template
-        assert!(refs.iter().any(|r| r.target_name == "UserCard" && r.kind == "component_usage"));
-        assert!(refs.iter().any(|r| r.target_name == "my-button" && r.kind == "component_usage"));
+        assert!(refs
+            .iter()
+            .any(|r| r.target_name == "UserCard" && r.kind == "component_usage"));
+        assert!(refs
+            .iter()
+            .any(|r| r.target_name == "my-button" && r.kind == "component_usage"));
     }
 
     // -------------------------------------------------------------------------
@@ -2001,16 +2182,18 @@ impl UserService {
     }
 }
 "#;
-        let result = parser.parse_file(code, "src/service.rs", SupportedLanguage::Rust).unwrap();
-        
+        let result = parser
+            .parse_file(code, "src/service.rs", SupportedLanguage::Rust)
+            .unwrap();
+
         // Symbols
         assert!(result.symbols.iter().any(|s| s.name == "UserService"));
         assert!(result.symbols.iter().any(|s| s.name == "new"));
         assert!(result.symbols.iter().any(|s| s.name == "get"));
-        
+
         // Imports (crate:: should be present)
         assert!(result.imports.iter().any(|i| i.path.contains("crate")));
-        
+
         // Chunks should be non-empty
         assert!(!result.chunks.is_empty());
     }
@@ -2035,17 +2218,27 @@ class UserServiceImpl implements UserService {
 
 export const userService = new UserServiceImpl();
 "#;
-        let result = parser.parse_file(code, "src/service.ts", SupportedLanguage::TypeScript).unwrap();
-        
+        let result = parser
+            .parse_file(code, "src/service.ts", SupportedLanguage::TypeScript)
+            .unwrap();
+
         // Symbols
-        assert!(result.symbols.iter().any(|s| s.name == "UserService" && s.kind == crate::models::chunk::SymbolKind::Interface));
-        assert!(result.symbols.iter().any(|s| s.name == "UserServiceImpl" && s.kind == crate::models::chunk::SymbolKind::Class));
+        assert!(result
+            .symbols
+            .iter()
+            .any(|s| s.name == "UserService"
+                && s.kind == crate::models::chunk::SymbolKind::Interface));
+        assert!(result
+            .symbols
+            .iter()
+            .any(|s| s.name == "UserServiceImpl"
+                && s.kind == crate::models::chunk::SymbolKind::Class));
         assert!(result.symbols.iter().any(|s| s.name == "getUser"));
-        
+
         // Imports
         assert!(result.imports.iter().any(|i| i.path == "./models"));
         assert!(result.imports.iter().any(|i| i.path == "axios"));
-        
+
         // References
         assert!(result.refs.iter().any(|r| r.target_name == "get"));
     }
@@ -2107,8 +2300,10 @@ fn привет_мир() {
         for i in 0..100 {
             code.push_str(&format!("fn func_{}() {{}}\n", i));
         }
-        
-        let symbols = parser.parse_symbols(&code, SupportedLanguage::Rust).unwrap();
+
+        let symbols = parser
+            .parse_symbols(&code, SupportedLanguage::Rust)
+            .unwrap();
         assert_eq!(symbols.len(), 100);
     }
 
@@ -2122,10 +2317,10 @@ fn first() {}
 fn second() {}
 "#;
         let symbols = parser.parse_symbols(code, SupportedLanguage::Rust).unwrap();
-        
+
         let first = symbols.iter().find(|s| s.name == "first").unwrap();
         let second = symbols.iter().find(|s| s.name == "second").unwrap();
-        
+
         // Line numbers are 0-indexed in tree-sitter
         assert_eq!(first.line_start, 2);
         assert_eq!(second.line_start, 4);

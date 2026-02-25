@@ -1,18 +1,18 @@
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
+mod cache; // Feature 008: server-side LRU cache
+mod commit;
 mod daemon;
 mod error;
+mod error_recovery; // Feature 016: graceful error handling & recovery
 mod indexer;
 mod ipc;
 mod languages;
 mod models;
-mod storage;
-mod commit;
-mod cache;  // Feature 008: server-side LRU cache
-mod resource_limits;  // Feature 015: connection pooling & resource management
-mod error_recovery;  // Feature 016: graceful error handling & recovery
-mod scoring_index;  // rkyv-based hot index for file scoring
+mod resource_limits; // Feature 015: connection pooling & resource management
+mod scoring_index;
+mod storage; // rkyv-based hot index for file scoring
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -182,8 +182,8 @@ fn run_daemon() -> anyhow::Result<()> {
                 .unwrap_or(4);
 
             let rt = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads((num_cpus / 2).max(4))  // Use 50% of CPUs for async tasks, min 4
-                .max_blocking_threads(num_cpus)  // Limit blocking thread pool to num_cpus
+                .worker_threads((num_cpus / 2).max(4)) // Use 50% of CPUs for async tasks, min 4
+                .max_blocking_threads(num_cpus) // Limit blocking thread pool to num_cpus
                 .thread_name("gofer-worker")
                 .enable_all()
                 .build()?;
@@ -196,7 +196,9 @@ fn run_daemon() -> anyhow::Result<()> {
 
             rt.block_on(async {
                 // Structured JSON logging по умолчанию для daemon, text через gofer_LOG_TEXT=1
-                let text_logging = std::env::var("gofer_LOG_TEXT").map(|v| v == "1" || v == "true").unwrap_or(false);
+                let text_logging = std::env::var("gofer_LOG_TEXT")
+                    .map(|v| v == "1" || v == "true")
+                    .unwrap_or(false);
                 let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
                     .unwrap_or_else(|_| "gofer=info".into());
 
@@ -223,18 +225,19 @@ fn run_daemon() -> anyhow::Result<()> {
                         "127.0.0.1:9091",
                         metrics_state,
                         metrics_cancel,
-                    ).await;
+                    )
+                    .await;
                 });
 
                 // Register signal handlers to trigger graceful shutdown
                 let token = state.shutdown_token.clone();
                 tokio::spawn(async move {
-                    let mut sigterm = tokio::signal::unix::signal(
-                        tokio::signal::unix::SignalKind::terminate(),
-                    ).expect("failed to register SIGTERM handler");
-                    let mut sigint = tokio::signal::unix::signal(
-                        tokio::signal::unix::SignalKind::interrupt(),
-                    ).expect("failed to register SIGINT handler");
+                    let mut sigterm =
+                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                            .expect("failed to register SIGTERM handler");
+                    let mut sigint =
+                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                            .expect("failed to register SIGINT handler");
 
                     tokio::select! {
                         _ = sigterm.recv() => {
@@ -349,15 +352,33 @@ async fn activate_with_progress(
         // Poll progress
         if let Ok(mut poll_client) = DaemonClient::connect(sock).await {
             if let Ok(prog) = poll_client.call("daemon/sync_progress", json!({})).await {
-                let active = prog.get("active").and_then(|v| v.as_bool()).unwrap_or(false);
+                let active = prog
+                    .get("active")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 if !active {
                     continue;
                 }
-                let total = prog.get("files_total").and_then(|v| v.as_u64()).unwrap_or(0);
-                let scanned = prog.get("files_scanned").and_then(|v| v.as_u64()).unwrap_or(0);
-                let parsed = prog.get("files_parsed").and_then(|v| v.as_u64()).unwrap_or(0);
-                let embedded = prog.get("chunks_embedded").and_then(|v| v.as_u64()).unwrap_or(0);
-                let written = prog.get("files_written").and_then(|v| v.as_u64()).unwrap_or(0);
+                let total = prog
+                    .get("files_total")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let scanned = prog
+                    .get("files_scanned")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let parsed = prog
+                    .get("files_parsed")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let embedded = prog
+                    .get("chunks_embedded")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let written = prog
+                    .get("files_written")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
 
                 // Stall detection: no progress in write counter
                 if written == last_written && scanned > 0 {
@@ -369,8 +390,10 @@ async fn activate_with_progress(
                             break;
                         } else {
                             eprintln!("\nWarning: Indexing stalled for 30 seconds");
-                            eprintln!("Progress: scan:{} parse:{} embed:{} write:{}/{}",
-                                scanned, parsed, embedded, written, total);
+                            eprintln!(
+                                "Progress: scan:{} parse:{} embed:{} write:{}/{}",
+                                scanned, parsed, embedded, written, total
+                            );
                             eprintln!("Check daemon logs: gofer logs -n 100");
                             break;
                         }
@@ -383,8 +406,8 @@ async fn activate_with_progress(
                 let pct = if total > 0 {
                     ((written as f64 / total as f64) * 100.0).min(100.0) as u64
                 } else if scanned > 0 {
-                    // During scanning phase, show scan progress
-                    ((scanned as f64 / scanned as f64) * 10.0).min(10.0) as u64
+                    // During scanning phase, show a small progress indicator
+                    10
                 } else {
                     0
                 };
@@ -572,7 +595,10 @@ fn handle_health() -> anyhow::Result<()> {
         let result = client.call("daemon/health", json!({})).await?;
         println!("{}", serde_json::to_string_pretty(&result)?);
 
-        let status = result.get("status").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let status = result
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         if status != "healthy" {
             std::process::exit(1);
         }

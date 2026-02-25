@@ -28,11 +28,7 @@ impl DaemonClient {
     }
 
     /// Send a JSON-RPC request and wait for the response.
-    pub async fn call(
-        &mut self,
-        method: &str,
-        params: Value,
-    ) -> Result<Value> {
+    pub async fn call(&mut self, method: &str, params: Value) -> Result<Value> {
         let id = self.next_id;
         self.next_id += 1;
 
@@ -70,10 +66,7 @@ impl DaemonClient {
             return false;
         }
         match Self::connect(socket_path).await {
-            Ok(mut client) => client
-                .call("ping", json!({}))
-                .await
-                .is_ok(),
+            Ok(mut client) => client.call("ping", json!({})).await.is_ok(),
             Err(_) => false,
         }
     }

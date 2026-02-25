@@ -2,10 +2,10 @@ use std::path::Path;
 
 use anyhow::Result;
 use serde_json::{json, Value};
-use tree_sitter::{Parser, Language};
+use tree_sitter::{Language, Parser};
 
-use crate::storage::SqliteStorage;
 use super::{LanguageService, ToolDefinition};
+use crate::storage::SqliteStorage;
 
 pub struct GoService {
     #[allow(dead_code)]
@@ -168,9 +168,7 @@ impl GoService {
                 in_require = false;
                 continue;
             }
-            if in_require
-                && !trimmed.is_empty() && !trimmed.starts_with("//")
-            {
+            if in_require && !trimmed.is_empty() && !trimmed.starts_with("//") {
                 requires.push(trimmed.to_string());
             }
             // Single-line require
@@ -186,7 +184,11 @@ impl GoService {
             for req in &requires {
                 let parts: Vec<&str> = req.split_whitespace().collect();
                 if parts.len() >= 2 {
-                    let indirect = if req.contains("// indirect") { " *(indirect)*" } else { "" };
+                    let indirect = if req.contains("// indirect") {
+                        " *(indirect)*"
+                    } else {
+                        ""
+                    };
                     out.push_str(&format!("- `{}` {}{}\n", parts[0], parts[1], indirect));
                 } else {
                     out.push_str(&format!("- `{}`\n", req));
@@ -249,7 +251,10 @@ impl GoService {
             .ok_or_else(|| anyhow::anyhow!("File not found for struct"))?;
 
         let mut out = format!("# Struct: `{}`\n\n", struct_name);
-        out.push_str(&format!("**Location:** `{}:{}`\n\n", file.path, struct_sym.line_start));
+        out.push_str(&format!(
+            "**Location:** `{}:{}`\n\n",
+            file.path, struct_sym.line_start
+        ));
 
         if let Some(ref sig) = struct_sym.signature {
             out.push_str(&format!("```go\n{}\n```\n\n", sig));
@@ -275,8 +280,16 @@ impl GoService {
             if !methods.is_empty() {
                 out.push_str("## Methods\n\n");
                 for (name, sig, is_ptr) in &methods {
-                    let recv = if *is_ptr { format!("*{}", struct_name) } else { struct_name.to_string() };
-                    out.push_str(&format!("- `func ({}) {}`\n", recv, sig.as_deref().unwrap_or(name)));
+                    let recv = if *is_ptr {
+                        format!("*{}", struct_name)
+                    } else {
+                        struct_name.to_string()
+                    };
+                    out.push_str(&format!(
+                        "- `func ({}) {}`\n",
+                        recv,
+                        sig.as_deref().unwrap_or(name)
+                    ));
                 }
                 out.push('\n');
             }
@@ -308,7 +321,10 @@ impl GoService {
         // References
         let refs = self.sqlite.get_incoming_references(struct_name).await?;
         if !refs.is_empty() {
-            out.push_str(&format!("## References\n\nUsed by **{}** symbol(s).\n", refs.len()));
+            out.push_str(&format!(
+                "## References\n\nUsed by **{}** symbol(s).\n",
+                refs.len()
+            ));
         }
 
         Ok(out)
@@ -323,7 +339,9 @@ impl GoService {
 
         // Find interface symbol to get its methods
         let symbols = self.sqlite.get_symbol_by_name(interface_name).await?;
-        let iface = symbols.iter().find(|s| s.kind == crate::models::chunk::SymbolKind::Interface);
+        let iface = symbols
+            .iter()
+            .find(|s| s.kind == crate::models::chunk::SymbolKind::Interface);
 
         let mut out = format!("# Implementations of `{}`\n\n", interface_name);
 
@@ -341,7 +359,10 @@ impl GoService {
             out.push_str("*Note: Go interfaces are implicitly satisfied. This tool searches for type references to the interface name in the index.*\n");
         } else {
             for r in &refs {
-                out.push_str(&format!("- Referenced by symbol ID {} (kind: {})\n", r.source_symbol_id, r.kind));
+                out.push_str(&format!(
+                    "- Referenced by symbol ID {} (kind: {})\n",
+                    r.source_symbol_id, r.kind
+                ));
             }
         }
 
@@ -439,7 +460,8 @@ impl GoService {
         let mut failures = Vec::new();
 
         // Map test name to accumulated output for failures
-        let mut test_outputs: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut test_outputs: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
 
         for line in stdout.lines() {
             if let Ok(event) = serde_json::from_str::<Value>(line) {
@@ -449,7 +471,8 @@ impl GoService {
 
                 if let Some(t) = test {
                     if !output_text.is_empty() {
-                        test_outputs.entry(t.to_string())
+                        test_outputs
+                            .entry(t.to_string())
                             .or_default()
                             .push_str(output_text);
                     }
@@ -458,7 +481,10 @@ impl GoService {
                         Some("pass") => passed += 1,
                         Some("fail") => {
                             failed += 1;
-                            let output = test_outputs.get(t).map(|s| s.as_str()).unwrap_or("(no output)");
+                            let output = test_outputs
+                                .get(t)
+                                .map(|s| s.as_str())
+                                .unwrap_or("(no output)");
                             failures.push(format!("### {}\n```\n{}\n```", t, output.trim()));
                         }
                         Some("skip") => skipped += 1,
@@ -473,7 +499,10 @@ impl GoService {
         } else {
             out.push_str("**Result:** FAIL\n");
         }
-        out.push_str(&format!("- Passed: {}\n- Failed: {}\n- Skipped: {}\n\n", passed, failed, skipped));
+        out.push_str(&format!(
+            "- Passed: {}\n- Failed: {}\n- Skipped: {}\n\n",
+            passed, failed, skipped
+        ));
 
         if !failures.is_empty() {
             out.push_str("## Failures\n\n");
@@ -481,10 +510,10 @@ impl GoService {
                 out.push_str(&format!("{}\n\n", fail));
             }
         } else if failed > 0 {
-             // Fallback if JSON parsing missed something but status failed
-             let stderr = String::from_utf8_lossy(&output.stderr);
-             out.push_str("## Stderr\n\n");
-             out.push_str(&format!("```\n{}\n```\n", stderr));
+            // Fallback if JSON parsing missed something but status failed
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            out.push_str("## Stderr\n\n");
+            out.push_str(&format!("```\n{}\n```\n", stderr));
         }
 
         Ok(out)
@@ -559,15 +588,18 @@ fn go_analyze_struct(
                                 Some(n) if n.kind() == "field_declaration" => n,
                                 _ => continue,
                             };
-                            let fname = field.child_by_field_name("name")
+                            let fname = field
+                                .child_by_field_name("name")
                                 .and_then(|n| n.utf8_text(src).ok())
                                 .unwrap_or("_")
                                 .to_string();
-                            let ftype = field.child_by_field_name("type")
+                            let ftype = field
+                                .child_by_field_name("type")
                                 .and_then(|n| n.utf8_text(src).ok())
                                 .unwrap_or("?")
                                 .to_string();
-                            let ftag = field.child_by_field_name("tag")
+                            let ftag = field
+                                .child_by_field_name("tag")
                                 .and_then(|n| n.utf8_text(src).ok())
                                 .map(|s| s.to_string());
                             fields.push((fname, ftype, ftag));
@@ -580,7 +612,8 @@ fn go_analyze_struct(
         // method_declaration: func (r *Type) Name(params) returns
         if node.kind() == "method_declaration" {
             let receiver = node.child_by_field_name("receiver");
-            let mname = node.child_by_field_name("name")
+            let mname = node
+                .child_by_field_name("name")
                 .and_then(|n| n.utf8_text(src).ok())
                 .unwrap_or("")
                 .to_string();
@@ -592,11 +625,10 @@ fn go_analyze_struct(
                 let is_ptr = recv_text.contains('*');
 
                 if is_match {
-                    let full_sig = node.utf8_text(src).ok()
-                        .map(|s| {
-                            // Extract just the signature line (first line)
-                            s.lines().next().unwrap_or(s).to_string()
-                        });
+                    let full_sig = node.utf8_text(src).ok().map(|s| {
+                        // Extract just the signature line (first line)
+                        s.lines().next().unwrap_or(s).to_string()
+                    });
                     methods.push((mname, full_sig, is_ptr));
                 }
             }

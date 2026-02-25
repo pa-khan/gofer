@@ -1,8 +1,8 @@
+use super::common::ToolContext;
+use crate::error::goferError;
+use crate::indexer::git::GitRepo;
 use anyhow::Result;
 use serde_json::{json, Value};
-use crate::error::goferError;
-use super::common::ToolContext;
-use crate::indexer::git::GitRepo;
 
 pub async fn tool_git_blame(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file = args.get("file").and_then(|v| v.as_str()).unwrap_or("");
@@ -65,7 +65,10 @@ pub async fn tool_git_history(args: Value, ctx: &ToolContext) -> Result<Value> {
 
 pub async fn tool_git_diff(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file = args.get("file").and_then(|v| v.as_str());
-    let staged = args.get("staged").and_then(|v| v.as_bool()).unwrap_or(false);
+    let staged = args
+        .get("staged")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let repo = match GitRepo::open(&ctx.root_path) {
         Some(r) => r,
@@ -90,11 +93,13 @@ pub async fn tool_git_diff(args: Value, ctx: &ToolContext) -> Result<Value> {
 }
 
 pub async fn tool_suggest_commit(args: Value, ctx: &ToolContext) -> Result<Value> {
-    let style = args.get("style")
+    let style = args
+        .get("style")
         .and_then(|v| v.as_str())
         .unwrap_or("conventional");
 
-    let include_emoji = args.get("include_emoji")
+    let include_emoji = args
+        .get("include_emoji")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
@@ -102,11 +107,7 @@ pub async fn tool_suggest_commit(args: Value, ctx: &ToolContext) -> Result<Value
     let repo_path = &ctx.root_path;
 
     // Call commit analyzer
-    let suggestion = crate::commit::suggest_commit_message(
-        repo_path,
-        include_emoji,
-        style
-    ).await?;
+    let suggestion = crate::commit::suggest_commit_message(repo_path, include_emoji, style).await?;
 
     Ok(serde_json::to_value(suggestion)?)
 }
@@ -116,11 +117,12 @@ pub async fn tool_verify_patch(args: Value, ctx: &ToolContext) -> Result<Value> 
     let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
 
     if file.is_empty() || content.is_empty() {
-        return Err(goferError::InvalidParams("Both 'file' and 'content' are required".into()).into());
+        return Err(
+            goferError::InvalidParams("Both 'file' and 'content' are required".into()).into(),
+        );
     }
 
-    let result =
-        crate::indexer::diagnostics::verify_patch(&ctx.root_path, file, content).await?;
+    let result = crate::indexer::diagnostics::verify_patch(&ctx.root_path, file, content).await?;
 
     Ok(json!({
         "file": file,

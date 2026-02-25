@@ -1,8 +1,8 @@
+use serde::Deserialize;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Instant;
-use serde::Deserialize;
 use tokio::sync::Mutex;
 
 use crate::storage::SqliteStorage;
@@ -83,7 +83,10 @@ struct TscDiagnostic {
 }
 
 /// Run cargo check and collect diagnostics
-pub async fn run_cargo_check(root: &Path, sqlite: &SqliteStorage) -> anyhow::Result<(usize, usize)> {
+pub async fn run_cargo_check(
+    root: &Path,
+    sqlite: &SqliteStorage,
+) -> anyhow::Result<(usize, usize)> {
     let cargo_toml = root.join("Cargo.toml");
     if !cargo_toml.exists() {
         return Ok((0, 0));
@@ -110,13 +113,23 @@ pub async fn run_cargo_check(root: &Path, sqlite: &SqliteStorage) -> anyhow::Res
         if let Ok(msg) = serde_json::from_str::<CargoMessage>(line) {
             if msg.reason == "compiler-message" {
                 if let Some(compiler_msg) = msg.message {
-                    process_cargo_message(&compiler_msg, sqlite, &mut error_count, &mut warning_count).await?;
+                    process_cargo_message(
+                        &compiler_msg,
+                        sqlite,
+                        &mut error_count,
+                        &mut warning_count,
+                    )
+                    .await?;
                 }
             }
         }
     }
 
-    tracing::info!("Cargo check complete: {} errors, {} warnings", error_count, warning_count);
+    tracing::info!(
+        "Cargo check complete: {} errors, {} warnings",
+        error_count,
+        warning_count
+    );
     Ok((error_count, warning_count))
 }
 
@@ -141,21 +154,25 @@ async fn process_cargo_message(
     let code = msg.code.as_ref().map(|c| c.code.as_str());
 
     // Get suggestion from children
-    let suggestion = msg.children.iter()
+    let suggestion = msg
+        .children
+        .iter()
         .find(|c| c.level == "help" || c.level == "note")
         .map(|c| c.message.clone());
 
     // Find primary span
     if let Some(span) = msg.spans.iter().find(|s| s.is_primary) {
-        sqlite.insert_error(
-            &span.file_name,
-            span.line_start as i32,
-            Some(span.column_start as i32),
-            severity,
-            code,
-            &msg.message,
-            suggestion.as_deref(),
-        ).await?;
+        sqlite
+            .insert_error(
+                &span.file_name,
+                span.line_start as i32,
+                Some(span.column_start as i32),
+                severity,
+                code,
+                &msg.message,
+                suggestion.as_deref(),
+            )
+            .await?;
     }
 
     Ok(())
@@ -212,8 +229,14 @@ pub async fn run_tsc_check(root: &Path, sqlite: &SqliteStorage) -> anyhow::Resul
     for line in combined.lines() {
         if let Some(caps) = re.captures(line) {
             let file = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-            let line_num: i32 = caps.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
-            let col: i32 = caps.get(3).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+            let line_num: i32 = caps
+                .get(2)
+                .and_then(|m| m.as_str().parse().ok())
+                .unwrap_or(0);
+            let col: i32 = caps
+                .get(3)
+                .and_then(|m| m.as_str().parse().ok())
+                .unwrap_or(0);
             let severity = caps.get(4).map(|m| m.as_str()).unwrap_or("error");
             let code = caps.get(5).map(|m| m.as_str()).unwrap_or("");
             let message = caps.get(6).map(|m| m.as_str()).unwrap_or("");
@@ -224,24 +247,33 @@ pub async fn run_tsc_check(root: &Path, sqlite: &SqliteStorage) -> anyhow::Resul
                 warning_count += 1;
             }
 
-            sqlite.insert_error(
-                file,
-                line_num,
-                Some(col),
-                severity,
-                Some(code),
-                message,
-                None,
-            ).await?;
+            sqlite
+                .insert_error(
+                    file,
+                    line_num,
+                    Some(col),
+                    severity,
+                    Some(code),
+                    message,
+                    None,
+                )
+                .await?;
         }
     }
 
-    tracing::info!("TypeScript check complete: {} errors, {} warnings", error_count, warning_count);
+    tracing::info!(
+        "TypeScript check complete: {} errors, {} warnings",
+        error_count,
+        warning_count
+    );
     Ok((error_count, warning_count))
 }
 
 /// Run all available diagnostics (rate-limited)
-pub async fn run_diagnostics(root: &Path, sqlite: &SqliteStorage) -> anyhow::Result<DiagnosticsResult> {
+pub async fn run_diagnostics(
+    root: &Path,
+    sqlite: &SqliteStorage,
+) -> anyhow::Result<DiagnosticsResult> {
     if !rate_check(&LAST_DIAGNOSTICS, DIAGNOSTICS_COOLDOWN_SECS).await {
         return Ok(DiagnosticsResult {
             total_errors: 0,
@@ -287,7 +319,7 @@ static VERIFY_MUTEX: std::sync::LazyLock<Arc<Mutex<()>>> =
 /// Результат верификации патча
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct VerifyResult {
-    pub status: String,        // "success" | "error" | "skipped"
+    pub status: String, // "success" | "error" | "skipped"
     pub diagnostics: Vec<VerifyDiagnostic>,
     pub summary: String,
 }
@@ -297,7 +329,7 @@ pub struct VerifyResult {
 pub struct VerifyDiagnostic {
     pub line: u32,
     pub column: Option<u32>,
-    pub severity: String,      // "error" | "warning"
+    pub severity: String, // "error" | "warning"
     pub code: Option<String>,
     pub message: String,
     pub suggestion: Option<String>,
@@ -333,7 +365,9 @@ pub async fn verify_patch(
         return Ok(VerifyResult {
             status: "skipped".into(),
             diagnostics: Vec::new(),
-            summary: "Rate-limited: слишком частые вызовы verify_patch, повторите через несколько секунд".into(),
+            summary:
+                "Rate-limited: слишком частые вызовы verify_patch, повторите через несколько секунд"
+                    .into(),
         });
     }
 
@@ -554,7 +588,10 @@ async fn run_cargo_verify(root: &Path, file_path: &str) -> anyhow::Result<Verify
     }
 
     let error_count = diagnostics.iter().filter(|d| d.severity == "error").count();
-    let warning_count = diagnostics.iter().filter(|d| d.severity == "warning").count();
+    let warning_count = diagnostics
+        .iter()
+        .filter(|d| d.severity == "warning")
+        .count();
 
     let status = if error_count > 0 { "error" } else { "success" };
     let summary = format!("{} errors, {} warnings", error_count, warning_count);
@@ -577,7 +614,9 @@ fn collect_cargo_diagnostics(
         _ => return,
     };
 
-    let suggestion = msg.children.iter()
+    let suggestion = msg
+        .children
+        .iter()
         .find(|c| c.level == "help" || c.level == "note")
         .map(|c| c.message.clone());
 
@@ -620,9 +659,15 @@ fn collect_cargo_diagnostics(
 async fn run_tsc_verify(root: &Path, file_path: &str) -> anyhow::Result<VerifyResult> {
     // Определяем команду
     let (cmd, args) = if root.join("node_modules/.bin/vue-tsc").exists() {
-        ("./node_modules/.bin/vue-tsc", vec!["--noEmit", "--pretty", "false"])
+        (
+            "./node_modules/.bin/vue-tsc",
+            vec!["--noEmit", "--pretty", "false"],
+        )
     } else if root.join("node_modules/.bin/tsc").exists() {
-        ("./node_modules/.bin/tsc", vec!["--noEmit", "--pretty", "false"])
+        (
+            "./node_modules/.bin/tsc",
+            vec!["--noEmit", "--pretty", "false"],
+        )
     } else {
         ("npx", vec!["tsc", "--noEmit", "--pretty", "false"])
     };
@@ -653,11 +698,19 @@ async fn run_tsc_verify(root: &Path, file_path: &str) -> anyhow::Result<VerifyRe
     let mut diagnostics = Vec::new();
 
     for line in combined.lines() {
-        let Some(caps) = re.captures(line) else { continue };
+        let Some(caps) = re.captures(line) else {
+            continue;
+        };
 
         let file = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-        let line_num: u32 = caps.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
-        let col: u32 = caps.get(3).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+        let line_num: u32 = caps
+            .get(2)
+            .and_then(|m| m.as_str().parse().ok())
+            .unwrap_or(0);
+        let col: u32 = caps
+            .get(3)
+            .and_then(|m| m.as_str().parse().ok())
+            .unwrap_or(0);
         let severity = caps.get(4).map(|m| m.as_str()).unwrap_or("error");
         let code = caps.get(5).map(|m| m.as_str().to_string());
         let message = caps.get(6).map(|m| m.as_str()).unwrap_or("");
@@ -676,7 +729,10 @@ async fn run_tsc_verify(root: &Path, file_path: &str) -> anyhow::Result<VerifyRe
     }
 
     let error_count = diagnostics.iter().filter(|d| d.severity == "error").count();
-    let warning_count = diagnostics.iter().filter(|d| d.severity == "warning").count();
+    let warning_count = diagnostics
+        .iter()
+        .filter(|d| d.severity == "warning")
+        .count();
 
     let status = if error_count > 0 { "error" } else { "success" };
     let summary = format!("{} errors, {} warnings", error_count, warning_count);
@@ -691,10 +747,19 @@ async fn run_tsc_verify(root: &Path, file_path: &str) -> anyhow::Result<VerifyRe
 /// Python: ruff check через stdin
 async fn run_ruff_verify(file_path: &Path) -> anyhow::Result<VerifyResult> {
     let content = tokio::fs::read_to_string(file_path).await?;
-    let file_name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("stdin.py");
+    let file_name = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("stdin.py");
 
     let output = tokio::process::Command::new("ruff")
-        .args(["check", "--output-format=json", "--stdin-filename", file_name, "-"])
+        .args([
+            "check",
+            "--output-format=json",
+            "--stdin-filename",
+            file_name,
+            "-",
+        ])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -724,12 +789,17 @@ async fn run_ruff_verify(file_path: &Path) -> anyhow::Result<VerifyResult> {
     if let Ok(ruff_results) = serde_json::from_str::<Vec<serde_json::Value>>(&stdout) {
         for entry in &ruff_results {
             let message = entry.get("message").and_then(|v| v.as_str()).unwrap_or("");
-            let code = entry.get("code").and_then(|v| v.as_str()).map(|s| s.to_string());
-            let row = entry.get("location")
+            let code = entry
+                .get("code")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let row = entry
+                .get("location")
                 .and_then(|l| l.get("row"))
                 .and_then(|r| r.as_u64())
                 .unwrap_or(0) as u32;
-            let col = entry.get("location")
+            let col = entry
+                .get("location")
                 .and_then(|l| l.get("column"))
                 .and_then(|c| c.as_u64())
                 .map(|c| c as u32);
@@ -740,7 +810,11 @@ async fn run_ruff_verify(file_path: &Path) -> anyhow::Result<VerifyResult> {
                 severity: "error".into(),
                 code,
                 message: message.into(),
-                suggestion: entry.get("fix").and_then(|f| f.get("message")).and_then(|m| m.as_str()).map(|s| s.into()),
+                suggestion: entry
+                    .get("fix")
+                    .and_then(|f| f.get("message"))
+                    .and_then(|m| m.as_str())
+                    .map(|s| s.into()),
             });
         }
     }
@@ -788,7 +862,8 @@ async fn run_python_syntax_check(file_path: &Path) -> anyhow::Result<VerifyResul
 
     // Парсим "SyntaxError" из py_compile вывода
     let re = regex::Regex::new(r"line (\d+)")?;
-    let line = re.captures(&stderr)
+    let line = re
+        .captures(&stderr)
         .and_then(|c| c.get(1))
         .and_then(|m| m.as_str().parse::<u32>().ok())
         .unwrap_or(0);

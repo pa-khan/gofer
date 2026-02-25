@@ -26,9 +26,11 @@ pub async fn tool_rust_goto_definition(args: Value, ctx: &ToolContext) -> Result
     } else {
         ctx.root_path.join(file_path).to_string_lossy().to_string()
     };
-    
+
     let content = tokio::fs::read_to_string(&abs_path).await?;
-    rust_analyzer.did_open(std::path::Path::new(&abs_path), content).await?;
+    rust_analyzer
+        .did_open(std::path::Path::new(&abs_path), content)
+        .await?;
 
     let locations = rust_analyzer
         .goto_definition(std::path::Path::new(&abs_path), line, character)
@@ -71,9 +73,11 @@ pub async fn tool_rust_find_references(args: Value, ctx: &ToolContext) -> Result
     } else {
         ctx.root_path.join(file_path).to_string_lossy().to_string()
     };
-    
+
     let content = tokio::fs::read_to_string(&abs_path).await?;
-    rust_analyzer.did_open(std::path::Path::new(&abs_path), content).await?;
+    rust_analyzer
+        .did_open(std::path::Path::new(&abs_path), content)
+        .await?;
 
     let locations = rust_analyzer
         .find_references(
@@ -120,9 +124,11 @@ pub async fn tool_rust_hover(args: Value, ctx: &ToolContext) -> Result<Value> {
     } else {
         ctx.root_path.join(file_path).to_string_lossy().to_string()
     };
-    
+
     let content = tokio::fs::read_to_string(&abs_path).await?;
-    rust_analyzer.did_open(std::path::Path::new(&abs_path), content).await?;
+    rust_analyzer
+        .did_open(std::path::Path::new(&abs_path), content)
+        .await?;
 
     let hover = rust_analyzer
         .hover(std::path::Path::new(&abs_path), line, character)
@@ -178,9 +184,11 @@ pub async fn tool_rust_diagnostics(args: Value, ctx: &ToolContext) -> Result<Val
     } else {
         ctx.root_path.join(file_path).to_string_lossy().to_string()
     };
-    
+
     let content = tokio::fs::read_to_string(&abs_path).await?;
-    rust_analyzer.did_open(std::path::Path::new(&abs_path), content).await?;
+    rust_analyzer
+        .did_open(std::path::Path::new(&abs_path), content)
+        .await?;
 
     let diagnostics = rust_analyzer
         .diagnostics(std::path::Path::new(&abs_path))
@@ -234,9 +242,11 @@ pub async fn tool_rust_completions(args: Value, ctx: &ToolContext) -> Result<Val
     } else {
         ctx.root_path.join(file_path).to_string_lossy().to_string()
     };
-    
+
     let content = tokio::fs::read_to_string(&abs_path).await?;
-    rust_analyzer.did_open(std::path::Path::new(&abs_path), content).await?;
+    rust_analyzer
+        .did_open(std::path::Path::new(&abs_path), content)
+        .await?;
 
     let items = rust_analyzer
         .completions(std::path::Path::new(&abs_path), line, character)
@@ -281,9 +291,11 @@ pub async fn tool_rust_inlay_hints(args: Value, ctx: &ToolContext) -> Result<Val
     } else {
         ctx.root_path.join(file_path).to_string_lossy().to_string()
     };
-    
+
     let content = tokio::fs::read_to_string(&abs_path).await?;
-    rust_analyzer.did_open(std::path::Path::new(&abs_path), content).await?;
+    rust_analyzer
+        .did_open(std::path::Path::new(&abs_path), content)
+        .await?;
 
     let hints = rust_analyzer
         .inlay_hints(std::path::Path::new(&abs_path), start_line, end_line)
@@ -294,9 +306,11 @@ pub async fn tool_rust_inlay_hints(args: Value, ctx: &ToolContext) -> Result<Val
         .map(|hint| {
             let label = match hint.label {
                 lsp_types::InlayHintLabel::String(s) => s,
-                lsp_types::InlayHintLabel::LabelParts(parts) => {
-                    parts.into_iter().map(|p| p.value).collect::<Vec<_>>().join("")
-                }
+                lsp_types::InlayHintLabel::LabelParts(parts) => parts
+                    .into_iter()
+                    .map(|p| p.value)
+                    .collect::<Vec<_>>()
+                    .join(""),
             };
 
             json!({
@@ -331,9 +345,11 @@ pub async fn tool_rust_code_actions(args: Value, ctx: &ToolContext) -> Result<Va
     } else {
         ctx.root_path.join(file_path).to_string_lossy().to_string()
     };
-    
+
     let content = tokio::fs::read_to_string(&abs_path).await?;
-    rust_analyzer.did_open(std::path::Path::new(&abs_path), content).await?;
+    rust_analyzer
+        .did_open(std::path::Path::new(&abs_path), content)
+        .await?;
 
     // Get diagnostics for this range to pass as context
     let all_diagnostics = rust_analyzer

@@ -95,7 +95,7 @@ pub struct Transaction {
 
 // Global transaction storage
 lazy_static::lazy_static! {
-    static ref TRANSACTIONS: Arc<RwLock<HashMap<String, Transaction>>> = 
+    static ref TRANSACTIONS: Arc<RwLock<HashMap<String, Transaction>>> =
         Arc::new(RwLock::new(HashMap::new()));
 }
 
@@ -151,9 +151,9 @@ pub async fn tool_add_operation(args: Value, ctx: &ToolContext) -> Result<Value>
 
     let mut transactions = TRANSACTIONS.write().await;
 
-    let transaction = transactions
-        .get_mut(transaction_id)
-        .ok_or_else(|| goferError::InvalidParams(format!("Transaction {} not found", transaction_id)))?;
+    let transaction = transactions.get_mut(transaction_id).ok_or_else(|| {
+        goferError::InvalidParams(format!("Transaction {} not found", transaction_id))
+    })?;
 
     // Check if transaction is still active
     if !matches!(transaction.status, TransactionStatus::Active) {
@@ -197,9 +197,9 @@ pub async fn tool_commit_transaction(args: Value, ctx: &ToolContext) -> Result<V
 
     let mut transactions = TRANSACTIONS.write().await;
 
-    let transaction = transactions
-        .get_mut(transaction_id)
-        .ok_or_else(|| goferError::InvalidParams(format!("Transaction {} not found", transaction_id)))?;
+    let transaction = transactions.get_mut(transaction_id).ok_or_else(|| {
+        goferError::InvalidParams(format!("Transaction {} not found", transaction_id))
+    })?;
 
     // Check status
     if !matches!(transaction.status, TransactionStatus::Active) {
@@ -285,9 +285,9 @@ pub async fn tool_rollback_transaction(args: Value, _ctx: &ToolContext) -> Resul
 
     let mut transactions = TRANSACTIONS.write().await;
 
-    let transaction = transactions
-        .get_mut(transaction_id)
-        .ok_or_else(|| goferError::InvalidParams(format!("Transaction {} not found", transaction_id)))?;
+    let transaction = transactions.get_mut(transaction_id).ok_or_else(|| {
+        goferError::InvalidParams(format!("Transaction {} not found", transaction_id))
+    })?;
 
     if !matches!(transaction.status, TransactionStatus::Active) {
         return Err(goferError::InvalidParams(format!(
@@ -407,7 +407,10 @@ fn parse_operation(data: &Value) -> Result<Operation> {
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| goferError::InvalidParams("path is required".into()))?
                 .to_string(),
-            reason: params.get("reason").and_then(|v| v.as_str()).map(String::from),
+            reason: params
+                .get("reason")
+                .and_then(|v| v.as_str())
+                .map(String::from),
             tags: params
                 .get("tags")
                 .and_then(|v| v.as_array())
