@@ -94,6 +94,12 @@ cargo test --all-features
 ### Проблема: rustfmt/clippy not installed
 **Решение**: Добавлен шаг `rustup component add rustfmt clippy`
 
+### Проблема: invalid linker name '-fuse-ld=mold'
+**Решение**: Создан `.cargo/config.ci.toml` с совместимым линкером, автоматически подменяется в CI
+
+### Проблема: protoc not found
+**Решение**: Установка `protobuf-compiler` через apt-get в CI
+
 ### Проблема: Тесты падают
 1. Проверить локально: `cargo test --all-features`
 2. Проверить логи в GitHub Actions
