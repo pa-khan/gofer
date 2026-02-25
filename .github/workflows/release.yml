@@ -1,9 +1,8 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       version:
@@ -15,38 +14,11 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  create-release:
-    name: Create Release
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-      version: ${{ steps.get_version.outputs.version }}
-    steps:
-      - name: Get version
-        id: get_version
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.get_version.outputs.version }}
-          release_name: Release ${{ steps.get_version.outputs.version }}
-          draft: false
-          prerelease: false
-
-  build-linux:
-    name: Build Linux ${{ matrix.target }}
-    needs: create-release
+  build-and-upload:
+    name: Build and Upload for ${{ matrix.target }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         target:
           - x86_64-unknown-linux-gnu
@@ -55,6 +27,15 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
+
+      - name: Get version from release
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          fi
 
       - name: Install system dependencies
         run: |
@@ -101,30 +82,37 @@ jobs:
       - name: Create tarball
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf gofer-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz gofer
-          mv gofer-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz ../../..
+          tar czf gofer-${{ steps.get_version.outputs.version }}-${{ matrix.target }}.tar.gz gofer
+          mv gofer-${{ steps.get_version.outputs.version }}-${{ matrix.target }}.tar.gz ../../..
 
       - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./gofer-${{ steps.get_version.outputs.version }}-${{ matrix.target }}.tar.gz
+          tag_name: ${{ steps.get_version.outputs.version }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./gofer-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz
-          asset_name: gofer-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz
-          asset_content_type: application/gzip
 
   build-packages:
-    name: Build ${{ matrix.package }} packages
-    needs: create-release
+    name: Build ${{ matrix.package }} package for ${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         package: [deb, rpm]
         arch: [x86_64, aarch64]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
+
+      - name: Get version from release
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          fi
 
       - name: Install system dependencies
         run: |
@@ -133,14 +121,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-deb
-        if: matrix.package == 'deb'
-        run: cargo install cargo-deb
-
-      - name: Install cargo-generate-rpm
-        if: matrix.package == 'rpm'
-        run: cargo install cargo-generate-rpm
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -181,7 +161,7 @@ jobs:
           # Создаем control файл
           cat > package/DEBIAN/control << EOF
           Package: gofer
-          Version: ${{ needs.create-release.outputs.version }}
+          Version: ${{ steps.get_version.outputs.version }}
           Section: devel
           Priority: optional
           Architecture: ${{ matrix.arch == 'x86_64' && 'amd64' || 'arm64' }}
@@ -208,7 +188,7 @@ jobs:
           EOF
           
           # Собираем пакет
-          dpkg-deb --build package gofer_${{ needs.create-release.outputs.version }}_${{ matrix.arch == 'x86_64' && 'amd64' || 'arm64' }}.deb
+          dpkg-deb --build package gofer_${{ steps.get_version.outputs.version }}_${{ matrix.arch == 'x86_64' && 'amd64' || 'arm64' }}.deb
 
       - name: Create RPM package
         if: matrix.package == 'rpm'
@@ -277,26 +257,22 @@ jobs:
           # Копируем результат
           cp ~/rpmbuild/RPMS/${{ matrix.arch }}/gofer-*.rpm $GITHUB_WORKSPACE/
         env:
-          VERSION: ${{ needs.create-release.outputs.version }}
+          VERSION: ${{ steps.get_version.outputs.version }}
 
       - name: Upload DEB package
         if: matrix.package == 'deb'
-        uses: actions/upload-release-asset@v1
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./gofer_${{ steps.get_version.outputs.version }}_${{ matrix.arch == 'x86_64' && 'amd64' || 'arm64' }}.deb
+          tag_name: ${{ steps.get_version.outputs.version }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./gofer_${{ needs.create-release.outputs.version }}_${{ matrix.arch == 'x86_64' && 'amd64' || 'arm64' }}.deb
-          asset_name: gofer_${{ needs.create-release.outputs.version }}_${{ matrix.arch == 'x86_64' && 'amd64' || 'arm64' }}.deb
-          asset_content_type: application/vnd.debian.binary-package
 
       - name: Upload RPM package
         if: matrix.package == 'rpm'
-        uses: actions/upload-release-asset@v1
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./gofer-${{ steps.get_version.outputs.version }}-1.${{ matrix.arch }}.rpm
+          tag_name: ${{ steps.get_version.outputs.version }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./gofer-${{ needs.create-release.outputs.version }}-1.${{ matrix.arch }}.rpm
-          asset_name: gofer-${{ needs.create-release.outputs.version }}-1.${{ matrix.arch }}.rpm
-          asset_content_type: application/x-rpm
