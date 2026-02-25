@@ -9,7 +9,7 @@
 //! - run_all_tests - запустить все тесты проекта
 
 use super::common::{resolve_path_buf, ToolContext};
-use crate::error::goferError;
+use crate::error::GoferError;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -38,12 +38,12 @@ pub async fn tool_execute_code(args: Value, ctx: &ToolContext) -> Result<Value> 
     let code = args
         .get("code")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("code is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("code is required".into()))?;
 
     let language = args
         .get("language")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("language is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("language is required".into()))?;
 
     let timeout_seconds = args
         .get("timeout")
@@ -57,7 +57,7 @@ pub async fn tool_execute_code(args: Value, ctx: &ToolContext) -> Result<Value> 
         "javascript" | "js" => execute_javascript_code(code, timeout_seconds).await?,
         _ => {
             return Err(
-                goferError::InvalidParams(format!("Unsupported language: {}", language)).into(),
+                GoferError::InvalidParams(format!("Unsupported language: {}", language)).into(),
             )
         }
     };
@@ -70,12 +70,12 @@ pub async fn tool_execute_function(args: Value, ctx: &ToolContext) -> Result<Val
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("path is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
     let function_name = args
         .get("function_name")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("function_name is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("function_name is required".into()))?;
 
     let function_args = args
         .get("args")
@@ -92,7 +92,7 @@ pub async fn tool_execute_function(args: Value, ctx: &ToolContext) -> Result<Val
     let abs_path = resolve_path_buf(&ctx.root_path, path);
 
     if !abs_path.exists() {
-        return Err(goferError::InvalidParams(format!("File not found: {}", path)).into());
+        return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
     }
 
     let ext = abs_path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -118,7 +118,7 @@ pub async fn tool_execute_function(args: Value, ctx: &ToolContext) -> Result<Val
         }
         _ => {
             return Err(
-                goferError::InvalidParams(format!("Unsupported file extension: {}", ext)).into(),
+                GoferError::InvalidParams(format!("Unsupported file extension: {}", ext)).into(),
             )
         }
     };
@@ -131,7 +131,7 @@ pub async fn tool_run_test(args: Value, ctx: &ToolContext) -> Result<Value> {
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("path is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
     let test_name = args.get("test_name").and_then(|v| v.as_str());
 
@@ -144,7 +144,7 @@ pub async fn tool_run_test(args: Value, ctx: &ToolContext) -> Result<Value> {
     let abs_path = resolve_path_buf(&ctx.root_path, path);
 
     if !abs_path.exists() {
-        return Err(goferError::InvalidParams(format!("File not found: {}", path)).into());
+        return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
     }
 
     let ext = abs_path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -155,7 +155,7 @@ pub async fn tool_run_test(args: Value, ctx: &ToolContext) -> Result<Value> {
         "js" | "ts" => run_javascript_test(&abs_path, test_name, timeout_seconds).await?,
         _ => {
             return Err(
-                goferError::InvalidParams(format!("Unsupported file extension: {}", ext)).into(),
+                GoferError::InvalidParams(format!("Unsupported file extension: {}", ext)).into(),
             )
         }
     };
@@ -194,7 +194,7 @@ pub async fn tool_run_all_tests(args: Value, ctx: &ToolContext) -> Result<Value>
         return run_pytest_tests(project_root, filter, timeout_seconds).await;
     }
 
-    Err(goferError::InvalidParams("No test framework detected in project".into()).into())
+    Err(GoferError::InvalidParams("No test framework detected in project".into()).into())
 }
 
 // Rust execution implementations

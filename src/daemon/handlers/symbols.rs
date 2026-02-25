@@ -1,5 +1,5 @@
 use super::common::{make_relative, resolve_path, ToolContext};
-use crate::error::goferError;
+use crate::error::GoferError;
 use crate::models::chunk::SymbolWithPath;
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -105,7 +105,7 @@ pub async fn tool_get_references(args: Value, ctx: &ToolContext) -> Result<Value
     let symbol = args.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
 
     if symbol.is_empty() {
-        return Err(goferError::InvalidParams("Symbol name is required".into()).into());
+        return Err(GoferError::InvalidParams("Symbol name is required".into()).into());
     }
 
     let refs = &ctx.sqlite.get_references_by_name(symbol).await?;
@@ -130,7 +130,7 @@ pub async fn tool_search_symbols(args: Value, ctx: &ToolContext) -> Result<Value
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
 
     if query.is_empty() {
-        return Err(goferError::InvalidParams("Query is required".into()).into());
+        return Err(GoferError::InvalidParams("Query is required".into()).into());
     }
 
     // Using FTS search with path info
@@ -163,7 +163,7 @@ pub async fn tool_get_callers(args: Value, ctx: &ToolContext) -> Result<Value> {
     let symbol = args.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
 
     if symbol.is_empty() {
-        return Err(goferError::InvalidParams("Symbol name is required".into()).into());
+        return Err(GoferError::InvalidParams("Symbol name is required".into()).into());
     }
 
     let refs = &ctx.sqlite.get_references_by_name(symbol).await?;
@@ -190,7 +190,7 @@ pub async fn tool_get_callees(args: Value, _ctx: &ToolContext) -> Result<Value> 
     let file = args.get("file").and_then(|v| v.as_str());
 
     if symbol.is_empty() {
-        return Err(goferError::InvalidParams("Symbol name is required".into()).into());
+        return Err(GoferError::InvalidParams("Symbol name is required".into()).into());
     }
 
     // Placeholder
@@ -207,7 +207,7 @@ pub async fn tool_symbol_exists(args: Value, ctx: &ToolContext) -> Result<Value>
     let file = args.get("file").and_then(|v| v.as_str());
 
     if symbol.is_empty() {
-        return Err(goferError::InvalidParams("Symbol name is required".into()).into());
+        return Err(GoferError::InvalidParams("Symbol name is required".into()).into());
     }
 
     let exists = if let Some(f) = file {
@@ -235,7 +235,7 @@ pub async fn tool_is_exported(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file = args.get("file").and_then(|v| v.as_str());
 
     if symbol.is_empty() {
-        return Err(goferError::InvalidParams("Symbol name is required".into()).into());
+        return Err(GoferError::InvalidParams("Symbol name is required".into()).into());
     }
 
     let matches = if let Some(f) = file {
@@ -278,7 +278,7 @@ pub async fn tool_has_documentation(args: Value, ctx: &ToolContext) -> Result<Va
     let file = args.get("file").and_then(|v| v.as_str());
 
     if symbol.is_empty() {
-        return Err(goferError::InvalidParams("Symbol name is required".into()).into());
+        return Err(GoferError::InvalidParams("Symbol name is required".into()).into());
     }
 
     let matches = if let Some(f) = file {

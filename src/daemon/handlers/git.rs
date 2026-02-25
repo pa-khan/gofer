@@ -1,5 +1,5 @@
 use super::common::ToolContext;
-use crate::error::goferError;
+use crate::error::GoferError;
 use crate::indexer::git::GitRepo;
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -9,12 +9,12 @@ pub async fn tool_git_blame(args: Value, ctx: &ToolContext) -> Result<Value> {
     let line = args.get("line").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
 
     if file.is_empty() {
-        return Err(goferError::InvalidParams("File path is required".into()).into());
+        return Err(GoferError::InvalidParams("File path is required".into()).into());
     }
 
     let repo = match GitRepo::open(&ctx.root_path) {
         Some(r) => r,
-        None => return Err(goferError::InvalidParams("Not a git repository".into()).into()),
+        None => return Err(GoferError::InvalidParams("Not a git repository".into()).into()),
     };
     let file_path = &ctx.root_path.join(file);
 
@@ -40,12 +40,12 @@ pub async fn tool_git_history(args: Value, ctx: &ToolContext) -> Result<Value> {
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
     if file.is_empty() {
-        return Err(goferError::InvalidParams("File path is required".into()).into());
+        return Err(GoferError::InvalidParams("File path is required".into()).into());
     }
 
     let repo = match GitRepo::open(&ctx.root_path) {
         Some(r) => r,
-        None => return Err(goferError::InvalidParams("Not a git repository".into()).into()),
+        None => return Err(GoferError::InvalidParams("Not a git repository".into()).into()),
     };
     let file_path = &ctx.root_path.join(file);
     let history = repo.file_history(file_path, limit);
@@ -72,7 +72,7 @@ pub async fn tool_git_diff(args: Value, ctx: &ToolContext) -> Result<Value> {
 
     let repo = match GitRepo::open(&ctx.root_path) {
         Some(r) => r,
-        None => return Err(goferError::InvalidParams("Not a git repository".into()).into()),
+        None => return Err(GoferError::InvalidParams("Not a git repository".into()).into()),
     };
 
     let file_path = file.map(|f| ctx.root_path.join(f));
@@ -118,7 +118,7 @@ pub async fn tool_verify_patch(args: Value, ctx: &ToolContext) -> Result<Value> 
 
     if file.is_empty() || content.is_empty() {
         return Err(
-            goferError::InvalidParams("Both 'file' and 'content' are required".into()).into(),
+            GoferError::InvalidParams("Both 'file' and 'content' are required".into()).into(),
         );
     }
 

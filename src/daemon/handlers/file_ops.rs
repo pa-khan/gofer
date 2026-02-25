@@ -9,7 +9,7 @@
 //! - search_files - regex/glob search with context
 
 use super::common::{make_relative_pathbuf, resolve_path_buf, ToolContext};
-use crate::error::goferError;
+use crate::error::GoferError;
 use anyhow::Result;
 use regex::RegexBuilder;
 use serde_json::{json, Value};
@@ -20,7 +20,7 @@ pub async fn tool_search_files(args: Value, ctx: &ToolContext) -> Result<Value> 
     let regex_pattern = args
         .get("regex_pattern")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("regex_pattern is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("regex_pattern is required".into()))?;
 
     let directory = args.get("directory").and_then(|v| v.as_str());
     let file_extension = args.get("file_extension").and_then(|v| v.as_str());
@@ -41,7 +41,7 @@ pub async fn tool_search_files(args: Value, ctx: &ToolContext) -> Result<Value> 
     let re = RegexBuilder::new(regex_pattern)
         .case_insensitive(case_insensitive)
         .build()
-        .map_err(|e| goferError::InvalidParams(format!("Invalid regex: {}", e)))?;
+        .map_err(|e| GoferError::InvalidParams(format!("Invalid regex: {}", e)))?;
 
     let search_root = if let Some(dir) = directory {
         resolve_path_buf(&ctx.root_path, dir)
@@ -51,7 +51,7 @@ pub async fn tool_search_files(args: Value, ctx: &ToolContext) -> Result<Value> 
 
     if !search_root.exists() {
         return Err(
-            goferError::InvalidParams(format!("Directory not found: {:?}", search_root)).into(),
+            GoferError::InvalidParams(format!("Directory not found: {:?}", search_root)).into(),
         );
     }
 
@@ -177,11 +177,11 @@ pub async fn tool_list_directory(args: Value, ctx: &ToolContext) -> Result<Value
     let abs_path = resolve_path_buf(&ctx.root_path, path);
 
     if !abs_path.exists() {
-        return Err(goferError::InvalidParams(format!("Path not found: {}", path)).into());
+        return Err(GoferError::InvalidParams(format!("Path not found: {}", path)).into());
     }
 
     if !abs_path.is_dir() {
-        return Err(goferError::InvalidParams(format!("Not a directory: {}", path)).into());
+        return Err(GoferError::InvalidParams(format!("Not a directory: {}", path)).into());
     }
 
     let mut total_files = 0u64;
@@ -243,12 +243,12 @@ pub async fn tool_get_file_metadata(args: Value, ctx: &ToolContext) -> Result<Va
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("path is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
     let abs_path = resolve_path_buf(&ctx.root_path, path);
 
     if !abs_path.exists() {
-        return Err(goferError::InvalidParams(format!("File not found: {}", path)).into());
+        return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
     }
 
     let metadata = tokio::fs::metadata(&abs_path).await?;
@@ -286,24 +286,24 @@ pub async fn tool_patch_file(args: Value, ctx: &ToolContext) -> Result<Value> {
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("path is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
     let search_string = args
         .get("search_string")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("search_string is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("search_string is required".into()))?;
 
     let replace_string = args
         .get("replace_string")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("replace_string is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("replace_string is required".into()))?;
 
     let occurrence = args.get("occurrence").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
 
     let abs_path = resolve_path_buf(&ctx.root_path, path);
 
     if !abs_path.exists() {
-        return Err(goferError::InvalidParams(format!("File not found: {}", path)).into());
+        return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
     }
 
     // Read file content
@@ -376,12 +376,12 @@ pub async fn tool_write_file(args: Value, ctx: &ToolContext) -> Result<Value> {
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("path is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
     let content = args
         .get("content")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("content is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("content is required".into()))?;
 
     let create_dirs = args
         .get("create_dirs")
@@ -420,12 +420,12 @@ pub async fn tool_append_to_file(args: Value, ctx: &ToolContext) -> Result<Value
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("path is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
     let content = args
         .get("content")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("content is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("content is required".into()))?;
 
     let newline_before = args
         .get("newline_before")
@@ -435,7 +435,7 @@ pub async fn tool_append_to_file(args: Value, ctx: &ToolContext) -> Result<Value
     let abs_path = resolve_path_buf(&ctx.root_path, path);
 
     if !abs_path.exists() {
-        return Err(goferError::InvalidParams(format!("File not found: {}", path)).into());
+        return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
     }
 
     // Read existing content to count lines
@@ -477,7 +477,7 @@ pub async fn tool_create_directory(args: Value, ctx: &ToolContext) -> Result<Val
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("path is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
     let recursive = args
         .get("recursive")
@@ -513,12 +513,12 @@ pub async fn tool_move_file(args: Value, ctx: &ToolContext) -> Result<Value> {
     let source = args
         .get("source")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("source is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("source is required".into()))?;
 
     let destination = args
         .get("destination")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("destination is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("destination is required".into()))?;
 
     let overwrite = args
         .get("overwrite")
@@ -529,7 +529,7 @@ pub async fn tool_move_file(args: Value, ctx: &ToolContext) -> Result<Value> {
     let abs_dest = resolve_path_buf(&ctx.root_path, destination);
 
     if !abs_source.exists() {
-        return Err(goferError::InvalidParams(format!("Source not found: {}", source)).into());
+        return Err(GoferError::InvalidParams(format!("Source not found: {}", source)).into());
     }
 
     if abs_dest.exists() && !overwrite {

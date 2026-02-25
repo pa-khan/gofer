@@ -7,6 +7,7 @@ use crate::daemon::handlers::common::ToolContext;
 
 /// Tool: rust_document_symbols
 /// Get document outline (structures, functions, enums, traits) for a Rust file.
+#[allow(dead_code)]
 pub async fn tool_rust_document_symbols(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file_path = args["file_path"]
         .as_str()
@@ -63,6 +64,7 @@ pub async fn tool_rust_document_symbols(args: Value, ctx: &ToolContext) -> Resul
 
 /// Tool: rust_workspace_symbols
 /// Search for symbols across the entire workspace by name.
+#[allow(dead_code)]
 pub async fn tool_rust_workspace_symbols(args: Value, ctx: &ToolContext) -> Result<Value> {
     let query = args["query"]
         .as_str()
@@ -95,6 +97,7 @@ pub async fn tool_rust_workspace_symbols(args: Value, ctx: &ToolContext) -> Resu
 
 /// Tool: rust_goto_implementation
 /// Go to concrete implementation(s) of a trait method or type.
+#[allow(dead_code)]
 pub async fn tool_rust_goto_implementation(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file_path = args["file_path"]
         .as_str()
@@ -141,6 +144,7 @@ pub async fn tool_rust_goto_implementation(args: Value, ctx: &ToolContext) -> Re
 
 /// Tool: rust_rename
 /// Rename a symbol across the entire workspace (safe semantic rename).
+#[allow(dead_code)]
 pub async fn tool_rust_rename(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file_path = args["file_path"]
         .as_str()
@@ -227,6 +231,7 @@ pub async fn tool_rust_rename(args: Value, ctx: &ToolContext) -> Result<Value> {
 
 /// Tool: rust_expand_macro
 /// Expand Rust macro at position to see generated code.
+#[allow(dead_code)]
 pub async fn tool_rust_expand_macro(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file_path = args["file_path"]
         .as_str()
@@ -269,6 +274,7 @@ pub async fn tool_rust_expand_macro(args: Value, ctx: &ToolContext) -> Result<Va
 
 /// Tool: rust_incoming_calls
 /// Get incoming calls (callers) for a function/method at position.
+#[allow(dead_code)]
 pub async fn tool_rust_incoming_calls(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file_path = args["file_path"]
         .as_str()
@@ -329,6 +335,7 @@ pub async fn tool_rust_incoming_calls(args: Value, ctx: &ToolContext) -> Result<
 
 /// Tool: rust_outgoing_calls
 /// Get outgoing calls (callees) for a function/method at position.
+#[allow(dead_code)]
 pub async fn tool_rust_outgoing_calls(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file_path = args["file_path"]
         .as_str()

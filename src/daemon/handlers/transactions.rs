@@ -10,7 +10,7 @@
 use super::common::{resolve_path_buf, ToolContext};
 use super::file_ops;
 use super::trash;
-use crate::error::goferError;
+use crate::error::GoferError;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -111,7 +111,7 @@ pub async fn tool_begin_transaction(args: Value, _ctx: &ToolContext) -> Result<V
 
     // Check if transaction already exists
     if transactions.contains_key(&transaction_id) {
-        return Err(goferError::InvalidParams(format!(
+        return Err(GoferError::InvalidParams(format!(
             "Transaction {} already exists",
             transaction_id
         ))
@@ -141,23 +141,23 @@ pub async fn tool_add_operation(args: Value, ctx: &ToolContext) -> Result<Value>
     let transaction_id = args
         .get("transaction_id")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("transaction_id is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("transaction_id is required".into()))?;
 
     let operation_data = args
         .get("operation")
-        .ok_or_else(|| goferError::InvalidParams("operation is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("operation is required".into()))?;
 
     let operation = parse_operation(operation_data)?;
 
     let mut transactions = TRANSACTIONS.write().await;
 
     let transaction = transactions.get_mut(transaction_id).ok_or_else(|| {
-        goferError::InvalidParams(format!("Transaction {} not found", transaction_id))
+        GoferError::InvalidParams(format!("Transaction {} not found", transaction_id))
     })?;
 
     // Check if transaction is still active
     if !matches!(transaction.status, TransactionStatus::Active) {
-        return Err(goferError::InvalidParams(format!(
+        return Err(GoferError::InvalidParams(format!(
             "Transaction {} is not active (status: {:?})",
             transaction_id, transaction.status
         ))
@@ -193,17 +193,17 @@ pub async fn tool_commit_transaction(args: Value, ctx: &ToolContext) -> Result<V
     let transaction_id = args
         .get("transaction_id")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("transaction_id is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("transaction_id is required".into()))?;
 
     let mut transactions = TRANSACTIONS.write().await;
 
     let transaction = transactions.get_mut(transaction_id).ok_or_else(|| {
-        goferError::InvalidParams(format!("Transaction {} not found", transaction_id))
+        GoferError::InvalidParams(format!("Transaction {} not found", transaction_id))
     })?;
 
     // Check status
     if !matches!(transaction.status, TransactionStatus::Active) {
-        return Err(goferError::InvalidParams(format!(
+        return Err(GoferError::InvalidParams(format!(
             "Transaction {} is not active",
             transaction_id
         ))
@@ -211,7 +211,7 @@ pub async fn tool_commit_transaction(args: Value, ctx: &ToolContext) -> Result<V
     }
 
     if transaction.operations.is_empty() {
-        return Err(goferError::InvalidParams("Transaction has no operations".into()).into());
+        return Err(GoferError::InvalidParams("Transaction has no operations".into()).into());
     }
 
     // Step 1: Create snapshots of all affected files
@@ -281,16 +281,16 @@ pub async fn tool_rollback_transaction(args: Value, _ctx: &ToolContext) -> Resul
     let transaction_id = args
         .get("transaction_id")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("transaction_id is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("transaction_id is required".into()))?;
 
     let mut transactions = TRANSACTIONS.write().await;
 
     let transaction = transactions.get_mut(transaction_id).ok_or_else(|| {
-        goferError::InvalidParams(format!("Transaction {} not found", transaction_id))
+        GoferError::InvalidParams(format!("Transaction {} not found", transaction_id))
     })?;
 
     if !matches!(transaction.status, TransactionStatus::Active) {
-        return Err(goferError::InvalidParams(format!(
+        return Err(GoferError::InvalidParams(format!(
             "Transaction {} is not active",
             transaction_id
         ))
@@ -341,28 +341,28 @@ fn parse_operation(data: &Value) -> Result<Operation> {
     let op_type = data
         .get("type")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("operation.type is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("operation.type is required".into()))?;
 
     let params = data
         .get("params")
-        .ok_or_else(|| goferError::InvalidParams("operation.params is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("operation.params is required".into()))?;
 
     match op_type {
         "patch_file" => Ok(Operation::PatchFile {
             path: params
                 .get("path")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| goferError::InvalidParams("path is required".into()))?
+                .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?
                 .to_string(),
             search_string: params
                 .get("search_string")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| goferError::InvalidParams("search_string is required".into()))?
+                .ok_or_else(|| GoferError::InvalidParams("search_string is required".into()))?
                 .to_string(),
             replace_string: params
                 .get("replace_string")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| goferError::InvalidParams("replace_string is required".into()))?
+                .ok_or_else(|| GoferError::InvalidParams("replace_string is required".into()))?
                 .to_string(),
             occurrence: params
                 .get("occurrence")
@@ -373,12 +373,12 @@ fn parse_operation(data: &Value) -> Result<Operation> {
             path: params
                 .get("path")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| goferError::InvalidParams("path is required".into()))?
+                .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?
                 .to_string(),
             content: params
                 .get("content")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| goferError::InvalidParams("content is required".into()))?
+                .ok_or_else(|| GoferError::InvalidParams("content is required".into()))?
                 .to_string(),
             create_dirs: params
                 .get("create_dirs")
@@ -389,12 +389,12 @@ fn parse_operation(data: &Value) -> Result<Operation> {
             path: params
                 .get("path")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| goferError::InvalidParams("path is required".into()))?
+                .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?
                 .to_string(),
             content: params
                 .get("content")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| goferError::InvalidParams("content is required".into()))?
+                .ok_or_else(|| GoferError::InvalidParams("content is required".into()))?
                 .to_string(),
             newline_before: params
                 .get("newline_before")
@@ -405,7 +405,7 @@ fn parse_operation(data: &Value) -> Result<Operation> {
             path: params
                 .get("path")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| goferError::InvalidParams("path is required".into()))?
+                .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?
                 .to_string(),
             reason: params
                 .get("reason")
@@ -425,12 +425,12 @@ fn parse_operation(data: &Value) -> Result<Operation> {
             source: params
                 .get("source")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| goferError::InvalidParams("source is required".into()))?
+                .ok_or_else(|| GoferError::InvalidParams("source is required".into()))?
                 .to_string(),
             destination: params
                 .get("destination")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| goferError::InvalidParams("destination is required".into()))?
+                .ok_or_else(|| GoferError::InvalidParams("destination is required".into()))?
                 .to_string(),
             overwrite: params
                 .get("overwrite")
@@ -441,14 +441,14 @@ fn parse_operation(data: &Value) -> Result<Operation> {
             path: params
                 .get("path")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| goferError::InvalidParams("path is required".into()))?
+                .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?
                 .to_string(),
             recursive: params
                 .get("recursive")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true),
         }),
-        _ => Err(goferError::InvalidParams(format!("Unknown operation type: {}", op_type)).into()),
+        _ => Err(GoferError::InvalidParams(format!("Unknown operation type: {}", op_type)).into()),
     }
 }
 

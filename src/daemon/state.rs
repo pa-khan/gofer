@@ -15,7 +15,7 @@ use crate::cache::CacheManager;
 use crate::error_recovery::CircuitBreaker; // Feature 016
 use crate::indexer::summarizer::{summary_worker, SummarizerConfig};
 use crate::indexer::{
-    goferConfig, load_config, start_watcher, EmbedderPool, IndexTask, IndexerService, Reranker,
+    load_config, start_watcher, EmbedderPool, GoferConfig, IndexTask, IndexerService, Reranker,
 };
 use crate::languages::LanguageService;
 use crate::resource_limits::ResourceLimits; // Feature 015
@@ -248,7 +248,7 @@ impl DaemonState {
             load_config(&gofer_home)
         } else {
             tracing::info!("No global config found, using defaults");
-            goferConfig::default()
+            GoferConfig::default()
         };
 
         tracing::info!("Loading embedding pool...");

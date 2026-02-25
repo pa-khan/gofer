@@ -11,7 +11,7 @@ const INTERNAL_ERROR: i32 = -32603;
 const SERVER_ERROR: i32 = -32000;
 
 #[derive(Error, Debug)]
-pub enum goferError {
+pub enum GoferError {
     #[error("Parse error: {0}")]
     ParseError(String),
 
@@ -38,7 +38,7 @@ pub enum goferError {
     Internal(#[from] anyhow::Error),
 }
 
-impl goferError {
+impl GoferError {
     /// JSON-RPC error code for this error variant.
     pub fn rpc_code(&self) -> i32 {
         match self {

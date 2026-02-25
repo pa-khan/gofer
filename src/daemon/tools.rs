@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::handlers::*;
-use crate::error::goferError; // Import all handlers modules
+use crate::error::GoferError; // Import all handlers modules
 
 // Re-export ToolContext so it's available as crate::daemon::tools::ToolContext
 pub use super::handlers::common::ToolContext;
@@ -120,7 +120,7 @@ pub async fn dispatch(name: &str, args: Value, ctx: &ToolContext) -> Result<Valu
         // Language tools folding (meta-tools)
         "lang_tools_list" => lang_tools::tool_lang_tools_list(args, ctx).await,
         "lang_tools_call" => lang_tools::tool_lang_tools_call(args, ctx).await,
-        _ => Err(goferError::MethodNotFound(name.to_string()).into()),
+        _ => Err(GoferError::MethodNotFound(name.to_string()).into()),
     }
 }
 

@@ -1650,7 +1650,7 @@ fn hello_world() {
         let symbols = parser.parse_symbols(code, SupportedLanguage::Rust).unwrap();
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "hello_world");
-        assert_eq!(symbols[0].kind, "function");
+        assert_eq!(symbols[0].kind, crate::models::chunk::SymbolKind::Function);
     }
 
     #[test]
@@ -1665,7 +1665,7 @@ pub struct User {
         let symbols = parser.parse_symbols(code, SupportedLanguage::Rust).unwrap();
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "User");
-        assert_eq!(symbols[0].kind, "struct");
+        assert_eq!(symbols[0].kind, crate::models::chunk::SymbolKind::Struct);
     }
 
     #[test]
@@ -1680,7 +1680,7 @@ enum Status {
         let symbols = parser.parse_symbols(code, SupportedLanguage::Rust).unwrap();
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "Status");
-        assert_eq!(symbols[0].kind, "enum");
+        assert_eq!(symbols[0].kind, crate::models::chunk::SymbolKind::Enum);
     }
 
     #[test]

@@ -4,7 +4,7 @@ use super::files::{
 };
 use super::search::tool_search;
 use super::symbols::{tool_get_references, tool_get_symbols};
-use crate::error::goferError;
+use crate::error::GoferError;
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -20,11 +20,11 @@ pub async fn tool_batch_operations(args: Value, ctx: &ToolContext) -> Result<Val
     let operations = args
         .get("operations")
         .and_then(|v| v.as_array())
-        .ok_or_else(|| goferError::InvalidParams("operations array is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("operations array is required".into()))?;
 
     // Validate batch size
     if operations.len() > MAX_BATCH_SIZE {
-        return Err(goferError::InvalidParams(format!(
+        return Err(GoferError::InvalidParams(format!(
             "Too many operations. Max: {}, got: {}",
             MAX_BATCH_SIZE,
             operations.len()

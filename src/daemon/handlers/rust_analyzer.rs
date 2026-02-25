@@ -7,6 +7,7 @@ use crate::daemon::handlers::common::ToolContext;
 
 /// Tool: rust_goto_definition
 /// Go to definition for Rust symbol at position.
+#[allow(dead_code)]
 pub async fn tool_rust_goto_definition(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file_path = args["file_path"]
         .as_str()
@@ -54,6 +55,7 @@ pub async fn tool_rust_goto_definition(args: Value, ctx: &ToolContext) -> Result
 
 /// Tool: rust_find_references
 /// Find all references to Rust symbol at position.
+#[allow(dead_code)]
 pub async fn tool_rust_find_references(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file_path = args["file_path"]
         .as_str()
@@ -106,6 +108,7 @@ pub async fn tool_rust_find_references(args: Value, ctx: &ToolContext) -> Result
 
 /// Tool: rust_hover
 /// Get hover information (type, docs) for Rust symbol at position.
+#[allow(dead_code)]
 pub async fn tool_rust_hover(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file_path = args["file_path"]
         .as_str()
@@ -172,6 +175,7 @@ pub async fn tool_rust_hover(args: Value, ctx: &ToolContext) -> Result<Value> {
 
 /// Tool: rust_diagnostics
 /// Get compiler diagnostics (errors, warnings) for a Rust file.
+#[allow(dead_code)]
 pub async fn tool_rust_diagnostics(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file_path = args["file_path"]
         .as_str()
@@ -224,6 +228,7 @@ pub async fn tool_rust_diagnostics(args: Value, ctx: &ToolContext) -> Result<Val
 
 /// Tool: rust_completions
 /// Get code completions for Rust at position.
+#[allow(dead_code)]
 pub async fn tool_rust_completions(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file_path = args["file_path"]
         .as_str()
@@ -273,6 +278,7 @@ pub async fn tool_rust_completions(args: Value, ctx: &ToolContext) -> Result<Val
 
 /// Tool: rust_inlay_hints
 /// Get inlay hints (type annotations, parameter names) for a Rust file range.
+#[allow(dead_code)]
 pub async fn tool_rust_inlay_hints(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file_path = args["file_path"]
         .as_str()
@@ -327,6 +333,7 @@ pub async fn tool_rust_inlay_hints(args: Value, ctx: &ToolContext) -> Result<Val
 
 /// Tool: rust_code_actions
 /// Get code actions (quick fixes, refactorings) for a Rust file range.
+#[allow(dead_code)]
 pub async fn tool_rust_code_actions(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file_path = args["file_path"]
         .as_str()

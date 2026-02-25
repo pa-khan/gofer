@@ -92,10 +92,16 @@ impl RustAnalyzer {
         // Send initialize request
         let initialize_params = InitializeParams {
             process_id: Some(std::process::id()),
-            root_uri: Some(
-                Uri::from_str(&format!("file://{}", self.root_path.display()))
+            workspace_folders: Some(vec![WorkspaceFolder {
+                uri: Uri::from_str(&format!("file://{}", self.root_path.display()))
                     .map_err(|_| anyhow::anyhow!("Invalid root path"))?,
-            ),
+                name: self
+                    .root_path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("workspace")
+                    .to_string(),
+            }]),
             capabilities: ClientCapabilities {
                 text_document: Some(TextDocumentClientCapabilities {
                     hover: Some(HoverClientCapabilities {
@@ -617,10 +623,11 @@ impl RustAnalyzer {
                         detail: None,
                         kind: sym.kind,
                         tags: sym.tags,
-                        deprecated: sym.deprecated,
                         range: sym.location.range,
                         selection_range: sym.location.range,
                         children: None,
+                        #[allow(deprecated)]
+                        deprecated: sym.deprecated,
                     })
                     .collect())
             }

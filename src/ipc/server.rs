@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::error::goferError;
+use crate::error::GoferError;
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -181,7 +181,7 @@ async fn handle_connection(stream: tokio::net::UnixStream, state: Arc<DaemonStat
                                 Ok(req) => handle_request(req, &st).await,
                                 Err(e) => {
                                     let (code, msg) =
-                                        goferError::ParseError(e.to_string()).into_rpc();
+                                        GoferError::ParseError(e.to_string()).into_rpc();
                                     DaemonResponse::error(Value::Null, code, msg)
                                 }
                             }
@@ -265,7 +265,7 @@ async fn handle_connection(stream: tokio::net::UnixStream, state: Arc<DaemonStat
                         resp
                     }
                     Err(e) => {
-                        let (code, msg) = goferError::ParseError(e.to_string()).into_rpc();
+                        let (code, msg) = GoferError::ParseError(e.to_string()).into_rpc();
                         DaemonResponse::error(Value::Null, code, msg)
                     }
                 };
@@ -324,7 +324,7 @@ async fn handle_request(req: DaemonRequest, state: &Arc<DaemonState>) -> DaemonR
         "prompts/get" => handle_prompts_get(id, &req, state).await,
 
         _ => {
-            let (code, msg) = goferError::MethodNotFound(req.method.clone()).into_rpc();
+            let (code, msg) = GoferError::MethodNotFound(req.method.clone()).into_rpc();
             DaemonResponse::error(id, code, msg)
         }
     }

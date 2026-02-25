@@ -496,6 +496,9 @@ mod tests {
             batch_size: 32,
             cache_dir: None,
             pool_size: 1,
+            quantized_model_path: None,
+            tokenizer_path: None,
+            tokenizer_config_path: None,
         };
         let pool = EmbedderPool::with_config(1, &config).unwrap();
         assert_eq!(pool.dimension(), 768);
@@ -507,6 +510,9 @@ mod tests {
             batch_size: 32,
             cache_dir: None,
             pool_size: 1,
+            quantized_model_path: None,
+            tokenizer_path: None,
+            tokenizer_config_path: None,
         };
         let pool = EmbedderPool::with_config(1, &config).unwrap();
         assert_eq!(pool.dimension(), 384);
@@ -519,6 +525,9 @@ mod tests {
             batch_size: 32,
             cache_dir: None,
             pool_size: 1,
+            quantized_model_path: None,
+            tokenizer_path: None,
+            tokenizer_config_path: None,
         };
         // Should fallback to BGESmallENV15
         let pool = EmbedderPool::with_config(1, &config).unwrap();

@@ -6,7 +6,7 @@
 //! - apply_lint_fix - применение автофиксов от линтера
 
 use super::common::{resolve_path_buf, ToolContext};
-use crate::error::goferError;
+use crate::error::GoferError;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -29,14 +29,14 @@ pub async fn tool_format_file(args: Value, ctx: &ToolContext) -> Result<Value> {
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("path is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
     let formatter = args.get("formatter").and_then(|v| v.as_str());
 
     let abs_path = resolve_path_buf(&ctx.root_path, path);
 
     if !abs_path.exists() {
-        return Err(goferError::InvalidParams(format!("File not found: {}", path)).into());
+        return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
     }
 
     let ext = abs_path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -51,7 +51,7 @@ pub async fn tool_format_file(args: Value, ctx: &ToolContext) -> Result<Value> {
     });
 
     if formatter_name == "unknown" {
-        return Err(goferError::InvalidParams(format!(
+        return Err(GoferError::InvalidParams(format!(
             "No formatter available for extension: {}",
             ext
         ))
@@ -70,7 +70,7 @@ pub async fn tool_format_file(args: Value, ctx: &ToolContext) -> Result<Value> {
         "gofmt" => format_with_gofmt(&abs_path).await?,
         _ => {
             return Err(
-                goferError::InvalidParams(format!("Unknown formatter: {}", formatter_name)).into(),
+                GoferError::InvalidParams(format!("Unknown formatter: {}", formatter_name)).into(),
             )
         }
     };
@@ -102,12 +102,12 @@ pub async fn tool_lint_file(args: Value, ctx: &ToolContext) -> Result<Value> {
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("path is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
     let abs_path = resolve_path_buf(&ctx.root_path, path);
 
     if !abs_path.exists() {
-        return Err(goferError::InvalidParams(format!("File not found: {}", path)).into());
+        return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
     }
 
     let ext = abs_path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -119,7 +119,7 @@ pub async fn tool_lint_file(args: Value, ctx: &ToolContext) -> Result<Value> {
         "py" => "ruff",
         "go" => "golangci-lint",
         _ => {
-            return Err(goferError::InvalidParams(format!(
+            return Err(GoferError::InvalidParams(format!(
                 "No linter available for extension: {}",
                 ext
             ))
@@ -135,7 +135,7 @@ pub async fn tool_lint_file(args: Value, ctx: &ToolContext) -> Result<Value> {
         "golangci-lint" => lint_with_golangci(&abs_path).await?,
         _ => {
             return Err(
-                goferError::InvalidParams(format!("Unknown linter: {}", linter_name)).into(),
+                GoferError::InvalidParams(format!("Unknown linter: {}", linter_name)).into(),
             )
         }
     };
@@ -169,12 +169,12 @@ pub async fn tool_apply_lint_fix(args: Value, ctx: &ToolContext) -> Result<Value
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("path is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
     let abs_path = resolve_path_buf(&ctx.root_path, path);
 
     if !abs_path.exists() {
-        return Err(goferError::InvalidParams(format!("File not found: {}", path)).into());
+        return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
     }
 
     let ext = abs_path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -185,7 +185,7 @@ pub async fn tool_apply_lint_fix(args: Value, ctx: &ToolContext) -> Result<Value
         "ts" | "tsx" | "js" | "jsx" => apply_eslint_fixes(&abs_path).await?,
         "py" => apply_ruff_fixes(&abs_path).await?,
         _ => {
-            return Err(goferError::InvalidParams(format!(
+            return Err(GoferError::InvalidParams(format!(
                 "No auto-fix available for extension: {}",
                 ext
             ))

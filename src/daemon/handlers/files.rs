@@ -1,5 +1,5 @@
 use super::common::{make_relative, resolve_path, ToolContext};
-use crate::error::goferError;
+use crate::error::GoferError;
 use crate::indexer::parser::core::SupportedLanguage;
 use crate::storage::SqliteStorage;
 use anyhow::Result;
@@ -14,12 +14,12 @@ pub async fn tool_read_file(args: Value, ctx: &ToolContext) -> Result<Value> {
     let end_line = args.get("end_line").and_then(|v| v.as_u64());
 
     if file.is_empty() {
-        return Err(goferError::InvalidParams("File path is required".into()).into());
+        return Err(GoferError::InvalidParams("File path is required".into()).into());
     }
 
     let file_path = &ctx.root_path.join(file);
     if !file_path.exists() {
-        return Err(goferError::InvalidParams(format!("File not found: {}", file)).into());
+        return Err(GoferError::InvalidParams(format!("File not found: {}", file)).into());
     }
 
     // Get file metadata for mtime check
@@ -101,7 +101,7 @@ pub async fn tool_file_exists(args: Value, ctx: &ToolContext) -> Result<Value> {
             "exists": exists
         }))
     } else {
-        Err(goferError::InvalidParams("file is required".into()).into())
+        Err(GoferError::InvalidParams("file is required".into()).into())
     }
 }
 
@@ -109,7 +109,7 @@ pub async fn tool_skeleton(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file = args.get("file").and_then(|v| v.as_str()).unwrap_or("");
 
     if file.is_empty() {
-        return Err(goferError::InvalidParams("File path is required".into()).into());
+        return Err(GoferError::InvalidParams("File path is required".into()).into());
     }
 
     let include_private = args
@@ -124,7 +124,7 @@ pub async fn tool_skeleton(args: Value, ctx: &ToolContext) -> Result<Value> {
 
     let file_path = &ctx.root_path.join(file);
     if !file_path.exists() {
-        return Err(goferError::InvalidParams(format!("File not found: {}", file)).into());
+        return Err(GoferError::InvalidParams(format!("File not found: {}", file)).into());
     }
 
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -197,12 +197,12 @@ pub async fn tool_read_function_context(args: Value, ctx: &ToolContext) -> Resul
         .unwrap_or(false);
 
     if file.is_empty() || function.is_empty() {
-        return Err(goferError::InvalidParams("File and function name are required".into()).into());
+        return Err(GoferError::InvalidParams("File and function name are required".into()).into());
     }
 
     let file_path = &ctx.root_path.join(file);
     if !file_path.exists() {
-        return Err(goferError::InvalidParams(format!("File not found: {}", file)).into());
+        return Err(GoferError::InvalidParams(format!("File not found: {}", file)).into());
     }
 
     let content = tokio::fs::read_to_string(&file_path).await?;
@@ -214,7 +214,7 @@ pub async fn tool_read_function_context(args: Value, ctx: &ToolContext) -> Resul
         "py" => SupportedLanguage::Python,
         "go" => SupportedLanguage::Go,
         _ => {
-            return Err(goferError::InvalidParams(format!("Unsupported language: {}", ext)).into())
+            return Err(GoferError::InvalidParams(format!("Unsupported language: {}", ext)).into())
         }
     };
 
@@ -274,7 +274,7 @@ pub async fn tool_read_function_context(args: Value, ctx: &ToolContext) -> Resul
         let function_node = if let Some(node) = func_node {
             node
         } else {
-            return Err(goferError::InvalidParams(format!(
+            return Err(GoferError::InvalidParams(format!(
                 "Function '{}' not found in {}",
                 function, file
             ))
@@ -345,12 +345,12 @@ pub async fn tool_read_types_only(args: Value, ctx: &ToolContext) -> Result<Valu
         .unwrap_or(true);
 
     if file.is_empty() {
-        return Err(goferError::InvalidParams("File path is required".into()).into());
+        return Err(GoferError::InvalidParams("File path is required".into()).into());
     }
 
     let file_path = &ctx.root_path.join(file);
     if !file_path.exists() {
-        return Err(goferError::InvalidParams(format!("File not found: {}", file)).into());
+        return Err(GoferError::InvalidParams(format!("File not found: {}", file)).into());
     }
 
     let content = tokio::fs::read_to_string(&file_path).await?;
@@ -401,12 +401,12 @@ pub async fn tool_context_bundle(args: Value, ctx: &ToolContext) -> Result<Value
         .unwrap_or(false);
 
     if file.is_empty() {
-        return Err(goferError::InvalidParams("File path is required".into()).into());
+        return Err(GoferError::InvalidParams("File path is required".into()).into());
     }
 
     let file_path = &ctx.root_path.join(file);
     if !file_path.exists() {
-        return Err(goferError::InvalidParams(format!("File not found: {}", file)).into());
+        return Err(GoferError::InvalidParams(format!("File not found: {}", file)).into());
     }
 
     let bundle = tokio::task::spawn_blocking({
@@ -450,7 +450,7 @@ pub async fn tool_find_files(args: Value, ctx: &ToolContext) -> Result<Value> {
     let path_filter = args.get("path").and_then(|v| v.as_str());
 
     let Some(pat) = pattern else {
-        return Err(goferError::InvalidParams("Pattern is required".into()).into());
+        return Err(GoferError::InvalidParams("Pattern is required".into()).into());
     };
 
     let search_root = if let Some(p) = path_filter {
@@ -493,7 +493,7 @@ pub async fn tool_grep(args: Value, ctx: &ToolContext) -> Result<Value> {
         .unwrap_or(100) as usize;
 
     let Some(pat) = pattern else {
-        return Err(goferError::InvalidParams("Pattern is required".into()).into());
+        return Err(GoferError::InvalidParams("Pattern is required".into()).into());
     };
 
     use regex::RegexBuilder;
@@ -501,7 +501,7 @@ pub async fn tool_grep(args: Value, ctx: &ToolContext) -> Result<Value> {
     let re = RegexBuilder::new(pat)
         .case_insensitive(case_insensitive)
         .build()
-        .map_err(|e| goferError::InvalidParams(format!("Invalid regex: {}", e)))?;
+        .map_err(|e| GoferError::InvalidParams(format!("Invalid regex: {}", e)))?;
 
     let search_root = if let Some(p) = path_filter {
         ctx.root_path.join(p)

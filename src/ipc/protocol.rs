@@ -63,9 +63,9 @@ impl DaemonResponse {
         }
     }
 
-    /// Build an error response from a [`goferError`].
+    /// Build an error response from a [`GoferError`].
     #[allow(dead_code)]
-    pub fn from_gofer_error(id: Value, err: crate::error::goferError) -> Self {
+    pub fn from_gofer_error(id: Value, err: crate::error::GoferError) -> Self {
         let (code, message) = err.into_rpc();
         Self::error(id, code, message)
     }

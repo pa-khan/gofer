@@ -12,7 +12,7 @@
 //! - apply_template - шаблонизация с подстановкой хешей
 
 use super::common::{resolve_path_buf, ToolContext};
-use crate::error::goferError;
+use crate::error::GoferError;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -49,18 +49,18 @@ pub async fn tool_extract_to_hash(args: Value, ctx: &ToolContext) -> Result<Valu
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("path is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
     let start_line = args
         .get("start_line")
         .and_then(|v| v.as_u64())
-        .ok_or_else(|| goferError::InvalidParams("start_line is required".into()))?
+        .ok_or_else(|| GoferError::InvalidParams("start_line is required".into()))?
         as usize;
 
     let end_line = args
         .get("end_line")
         .and_then(|v| v.as_u64())
-        .ok_or_else(|| goferError::InvalidParams("end_line is required".into()))?
+        .ok_or_else(|| GoferError::InvalidParams("end_line is required".into()))?
         as usize;
 
     let cut = args.get("cut").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -68,7 +68,7 @@ pub async fn tool_extract_to_hash(args: Value, ctx: &ToolContext) -> Result<Valu
     let abs_path = resolve_path_buf(&ctx.root_path, path);
 
     if !abs_path.exists() {
-        return Err(goferError::InvalidParams(format!("File not found: {}", path)).into());
+        return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
     }
 
     // Read file
@@ -76,7 +76,7 @@ pub async fn tool_extract_to_hash(args: Value, ctx: &ToolContext) -> Result<Valu
     let lines: Vec<&str> = content.lines().collect();
 
     if start_line < 1 || end_line > lines.len() || start_line > end_line {
-        return Err(goferError::InvalidParams(format!(
+        return Err(GoferError::InvalidParams(format!(
             "Invalid line range: {}-{} (file has {} lines)",
             start_line,
             end_line,
@@ -91,7 +91,7 @@ pub async fn tool_extract_to_hash(args: Value, ctx: &ToolContext) -> Result<Valu
 
     // Check size limit
     if block_content.len() > MAX_BUFFER_SIZE_BYTES {
-        return Err(goferError::InvalidParams(format!(
+        return Err(GoferError::InvalidParams(format!(
             "Block size {} exceeds max {} bytes",
             block_content.len(),
             MAX_BUFFER_SIZE_BYTES
@@ -124,7 +124,7 @@ pub async fn tool_extract_to_hash(args: Value, ctx: &ToolContext) -> Result<Valu
 
             let buffers = BUFFERS.read().await;
             if buffers.len() >= MAX_BUFFERS {
-                return Err(goferError::InvalidParams(format!(
+                return Err(GoferError::InvalidParams(format!(
                     "Buffer limit reached ({} buffers)",
                     MAX_BUFFERS
                 ))
@@ -181,29 +181,29 @@ pub async fn tool_insert_hash(args: Value, ctx: &ToolContext) -> Result<Value> {
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("path is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
     let line_number = args
         .get("line_number")
         .and_then(|v| v.as_u64())
-        .ok_or_else(|| goferError::InvalidParams("line_number is required".into()))?
+        .ok_or_else(|| GoferError::InvalidParams("line_number is required".into()))?
         as usize;
 
     let hash_id = args
         .get("hash_id")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("hash_id is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("hash_id is required".into()))?;
 
     // Get buffer content
     let buffer_content = {
         let mut buffers = BUFFERS.write().await;
         let buffer = buffers
             .get_mut(hash_id)
-            .ok_or_else(|| goferError::InvalidParams(format!("Hash not found: {}", hash_id)))?;
+            .ok_or_else(|| GoferError::InvalidParams(format!("Hash not found: {}", hash_id)))?;
 
         // Check expiration
         if Utc::now() > buffer.expires_at {
-            return Err(goferError::InvalidParams(format!("Hash expired: {}", hash_id)).into());
+            return Err(GoferError::InvalidParams(format!("Hash expired: {}", hash_id)).into());
         }
 
         // Increment access count
@@ -264,34 +264,34 @@ pub async fn tool_replace_with_hash(args: Value, ctx: &ToolContext) -> Result<Va
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("path is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
     let start_line = args
         .get("start_line")
         .and_then(|v| v.as_u64())
-        .ok_or_else(|| goferError::InvalidParams("start_line is required".into()))?
+        .ok_or_else(|| GoferError::InvalidParams("start_line is required".into()))?
         as usize;
 
     let end_line = args
         .get("end_line")
         .and_then(|v| v.as_u64())
-        .ok_or_else(|| goferError::InvalidParams("end_line is required".into()))?
+        .ok_or_else(|| GoferError::InvalidParams("end_line is required".into()))?
         as usize;
 
     let hash_id = args
         .get("hash_id")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("hash_id is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("hash_id is required".into()))?;
 
     // Get buffer content
     let buffer_content = {
         let mut buffers = BUFFERS.write().await;
         let buffer = buffers
             .get_mut(hash_id)
-            .ok_or_else(|| goferError::InvalidParams(format!("Hash not found: {}", hash_id)))?;
+            .ok_or_else(|| GoferError::InvalidParams(format!("Hash not found: {}", hash_id)))?;
 
         if Utc::now() > buffer.expires_at {
-            return Err(goferError::InvalidParams(format!("Hash expired: {}", hash_id)).into());
+            return Err(GoferError::InvalidParams(format!("Hash expired: {}", hash_id)).into());
         }
 
         buffer.access_count += 1;
@@ -301,7 +301,7 @@ pub async fn tool_replace_with_hash(args: Value, ctx: &ToolContext) -> Result<Va
     let abs_path = resolve_path_buf(&ctx.root_path, path);
 
     if !abs_path.exists() {
-        return Err(goferError::InvalidParams(format!("File not found: {}", path)).into());
+        return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
     }
 
     // Read file
@@ -309,7 +309,7 @@ pub async fn tool_replace_with_hash(args: Value, ctx: &ToolContext) -> Result<Va
     let mut lines: Vec<String> = content.lines().map(String::from).collect();
 
     if start_line < 1 || end_line > lines.len() || start_line > end_line {
-        return Err(goferError::InvalidParams(format!(
+        return Err(GoferError::InvalidParams(format!(
             "Invalid line range: {}-{} (file has {} lines)",
             start_line,
             end_line,
@@ -348,10 +348,10 @@ pub async fn tool_content_to_hash(args: Value, _ctx: &ToolContext) -> Result<Val
     let content = args
         .get("content")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("content is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("content is required".into()))?;
 
     if content.len() > MAX_BUFFER_SIZE_BYTES {
-        return Err(goferError::InvalidParams(format!(
+        return Err(GoferError::InvalidParams(format!(
             "Content size {} exceeds max {} bytes",
             content.len(),
             MAX_BUFFER_SIZE_BYTES
@@ -450,7 +450,7 @@ pub async fn tool_clear_buffer(args: Value, _ctx: &ToolContext) -> Result<Value>
                 "status": "cleared",
             }))
         } else {
-            Err(goferError::InvalidParams(format!("Hash not found: {}", id)).into())
+            Err(GoferError::InvalidParams(format!("Hash not found: {}", id)).into())
         }
     } else {
         // Clear all buffers

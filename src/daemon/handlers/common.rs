@@ -19,6 +19,7 @@ pub struct ToolContext {
     pub cache: Arc<CacheManager>,
     pub embedding_circuit: Arc<CircuitBreaker>,
     pub vector_circuit: Arc<CircuitBreaker>,
+    #[allow(dead_code)]
     pub rust_analyzer: Arc<RwLock<Option<Arc<RustAnalyzer>>>>,
     /// Language-specific services (Vue, TypeScript, Python, etc.)
     pub language_services: Arc<Vec<Box<dyn LanguageService>>>,
@@ -26,6 +27,7 @@ pub struct ToolContext {
 
 impl ToolContext {
     /// Get or initialize rust-analyzer for this project.
+    #[allow(dead_code)]
     pub async fn get_rust_analyzer(&self) -> anyhow::Result<Arc<RustAnalyzer>> {
         // Fast path: already initialized
         {

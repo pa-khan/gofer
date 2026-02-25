@@ -1,5 +1,5 @@
 use super::common::{make_relative, resolve_path, ToolContext};
-use crate::error::goferError;
+use crate::error::GoferError;
 use crate::models::Rule;
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -17,7 +17,7 @@ pub async fn tool_project_tree(args: Value, ctx: &ToolContext) -> Result<Value> 
     };
 
     if !root_path.exists() {
-        return Err(goferError::InvalidParams(format!("Path not found: {}", path)).into());
+        return Err(GoferError::InvalidParams(format!("Path not found: {}", path)).into());
     }
 
     let mut tree = Vec::new();
@@ -85,7 +85,7 @@ pub async fn tool_dependency_impact(args: Value, ctx: &ToolContext) -> Result<Va
     let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("");
 
     if name.is_empty() {
-        return Err(goferError::InvalidParams("Dependency name is required".into()).into());
+        return Err(GoferError::InvalidParams("Dependency name is required".into()).into());
     }
 
     let usages = &ctx.sqlite.get_dependency_usage(name).await?;
@@ -155,7 +155,7 @@ pub async fn tool_get_summary(args: Value, ctx: &ToolContext) -> Result<Value> {
     let file = args.get("file").and_then(|v| v.as_str()).unwrap_or("");
 
     if file.is_empty() {
-        return Err(goferError::InvalidParams("File path is required".into()).into());
+        return Err(GoferError::InvalidParams("File path is required".into()).into());
     }
 
     match &ctx
@@ -202,7 +202,7 @@ pub async fn tool_get_vue_tree(args: Value, ctx: &ToolContext) -> Result<Value> 
     let file = args.get("file").and_then(|v| v.as_str()).unwrap_or("");
 
     if file.is_empty() {
-        return Err(goferError::InvalidParams("File path is required".into()).into());
+        return Err(GoferError::InvalidParams("File path is required".into()).into());
     }
 
     match &ctx
@@ -231,7 +231,7 @@ pub async fn tool_add_rule(args: Value, ctx: &ToolContext) -> Result<Value> {
     let priority = args.get("priority").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
 
     if rule.is_empty() {
-        return Err(goferError::InvalidParams("Rule text is required".into()).into());
+        return Err(GoferError::InvalidParams("Rule text is required".into()).into());
     }
 
     let r = Rule {
@@ -256,7 +256,7 @@ pub async fn tool_mark_golden_sample(args: Value, ctx: &ToolContext) -> Result<V
     let description = args.get("description").and_then(|v| v.as_str());
 
     if file.is_empty() {
-        return Err(goferError::InvalidParams("File path is required".into()).into());
+        return Err(GoferError::InvalidParams("File path is required".into()).into());
     }
 
     let file_path = resolve_path(&ctx.root_path, file);
@@ -272,6 +272,6 @@ pub async fn tool_mark_golden_sample(args: Value, ctx: &ToolContext) -> Result<V
             "marked": true
         }))
     } else {
-        Err(goferError::InvalidParams(format!("File not indexed: {}", file)).into())
+        Err(GoferError::InvalidParams(format!("File not indexed: {}", file)).into())
     }
 }

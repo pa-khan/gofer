@@ -1,5 +1,5 @@
 use super::common::{make_relative, resolve_path, ToolContext};
-use crate::error::goferError;
+use crate::error::GoferError;
 use crate::models::chunk::SymbolKind;
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -46,7 +46,7 @@ pub async fn tool_search(args: Value, ctx: &ToolContext) -> Result<Value> {
     let path_filter = args.get("path").and_then(|v| v.as_str());
 
     if query.is_empty() {
-        return Err(goferError::InvalidParams("Query is required".into()).into());
+        return Err(GoferError::InvalidParams("Query is required".into()).into());
     }
 
     // NEW: Feature 008 - Check cache first
@@ -373,7 +373,7 @@ pub async fn tool_cross_stack_search(args: Value, ctx: &ToolContext) -> Result<V
         .unwrap_or(true);
 
     if query.is_empty() {
-        return Err(goferError::InvalidParams("Query is required".into()).into());
+        return Err(GoferError::InvalidParams("Query is required".into()).into());
     }
 
     // Run normal hybrid search first
@@ -442,7 +442,7 @@ pub async fn tool_search_by_purpose(args: Value, ctx: &ToolContext) -> Result<Va
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
     if query.is_empty() {
-        return Err(goferError::InvalidParams("Query is required".into()).into());
+        return Err(GoferError::InvalidParams("Query is required".into()).into());
     }
 
     // Strategy: combine vector search (semantic) with keyword matching on summaries.
@@ -537,7 +537,7 @@ pub async fn tool_smart_file_selection(args: Value, ctx: &ToolContext) -> Result
         .unwrap_or(0.3) as f32;
 
     if query.is_empty() {
-        return Err(goferError::InvalidParams("Query is required".into()).into());
+        return Err(GoferError::InvalidParams("Query is required".into()).into());
     }
 
     // Check cache first (using get_search as a substitute for get_file_selection)

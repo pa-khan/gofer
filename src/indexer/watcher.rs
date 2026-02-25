@@ -19,7 +19,7 @@ pub enum IndexTask {
 
 /// gofer configuration from config.toml
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
-pub struct goferConfig {
+pub struct GoferConfig {
     #[serde(default)]
     pub server: ServerConfig,
     #[serde(default)]
@@ -191,20 +191,20 @@ pub struct DomainsConfig {
 }
 
 /// Load gofer configuration from .gofer/config.toml
-pub fn load_config(gofer_dir: &Path) -> goferConfig {
+pub fn load_config(gofer_dir: &Path) -> GoferConfig {
     let config_path = gofer_dir.join("config.toml");
     if !config_path.exists() {
-        return goferConfig::default();
+        return GoferConfig::default();
     }
 
     match std::fs::read_to_string(&config_path) {
         Ok(content) => toml::from_str(&content).unwrap_or_else(|e| {
             tracing::warn!("Failed to parse config.toml: {}", e);
-            goferConfig::default()
+            GoferConfig::default()
         }),
         Err(e) => {
             tracing::warn!("Failed to read config.toml: {}", e);
-            goferConfig::default()
+            GoferConfig::default()
         }
     }
 }

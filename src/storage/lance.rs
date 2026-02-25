@@ -466,7 +466,7 @@ mod tests {
             line_start,
             line_end,
             symbol_name: Some("test_symbol".to_string()),
-            symbol_kind: Some("function".to_string()),
+            symbol_kind: Some(crate::models::chunk::SymbolKind::Function),
             symbol_path: None,
             scopes: Vec::new(),
         }

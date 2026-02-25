@@ -1,5 +1,5 @@
 use super::common::{make_relative, resolve_path, ToolContext};
-use crate::error::goferError;
+use crate::error::GoferError;
 use anyhow::Result;
 use serde_json::{json, Value};
 
@@ -160,7 +160,7 @@ pub async fn tool_has_tests_for(args: Value, ctx: &ToolContext) -> Result<Value>
     let file = args.get("file").and_then(|v| v.as_str());
 
     let Some(file_path) = file else {
-        return Err(goferError::InvalidParams("file parameter required".into()).into());
+        return Err(GoferError::InvalidParams("file parameter required".into()).into());
     };
 
     // Common test file patterns

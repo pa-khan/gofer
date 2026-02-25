@@ -7,7 +7,7 @@
 //! - purge_trash - permanently delete from trash
 
 use super::common::{make_relative_pathbuf, resolve_path_buf, ToolContext};
-use crate::error::goferError;
+use crate::error::GoferError;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -65,7 +65,7 @@ pub async fn tool_delete_safe(args: Value, ctx: &ToolContext) -> Result<Value> {
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("path is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
     let reason = args.get("reason").and_then(|v| v.as_str());
 
@@ -82,7 +82,7 @@ pub async fn tool_delete_safe(args: Value, ctx: &ToolContext) -> Result<Value> {
     let abs_path = resolve_path_buf(&ctx.root_path, path);
 
     if !abs_path.exists() {
-        return Err(goferError::InvalidParams(format!("Path not found: {}", path)).into());
+        return Err(GoferError::InvalidParams(format!("Path not found: {}", path)).into());
     }
 
     let trash_root = get_trash_root(ctx);
@@ -194,7 +194,7 @@ pub async fn tool_restore(args: Value, ctx: &ToolContext) -> Result<Value> {
     let deletion_uuid = args
         .get("deletion_uuid")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| goferError::InvalidParams("deletion_uuid is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("deletion_uuid is required".into()))?;
 
     let target_path = args.get("target_path").and_then(|v| v.as_str());
 

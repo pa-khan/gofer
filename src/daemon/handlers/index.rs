@@ -1,5 +1,5 @@
 use super::common::ToolContext;
-use crate::error::goferError;
+use crate::error::GoferError;
 use anyhow::Result;
 use serde_json::{json, Value};
 
@@ -707,7 +707,7 @@ pub async fn tool_force_reindex(args: Value, ctx: &ToolContext) -> Result<Value>
             }))
         }
 
-        _ => Err(goferError::InvalidParams(format!("Invalid scope: {}", scope)).into()),
+        _ => Err(GoferError::InvalidParams(format!("Invalid scope: {}", scope)).into()),
     }
 }
 
