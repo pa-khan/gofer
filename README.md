@@ -1,237 +1,242 @@
 # gofer
 
-**Интеллектуальный MCP-сервер для кодовых баз на Rust**
+**Intelligent MCP Server for Rust Codebases**
 
 [![Rust](https://img.shields.io/badge/rust-1.76+-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-MVP--testing-yellow.svg)](https://github.com)
+[![Status](https://img.shields.io/badge/status-MVP--testing-yellow.svg)](https://github.com/pa-khan/gofer)
+[![GitHub](https://img.shields.io/badge/GitHub-pa--khan%2Fgofer-blue?logo=github)](https://github.com/pa-khan/gofer)
+
+**[Русская версия](README.ru.md)** | **English**
 
 ---
 
-## 📖 Оглавление
+## 📖 Table of Contents
 
-- [О проекте](#-о-проекте)
-- [Зачем нужен gofer?](#-зачем-нужен-gofer)
-- [Технологический стек](#-технологический-стек)
-- [Текущая стадия](#-текущая-стадия)
-- [Установка и запуск](#-установка-и-запуск)
-- [Функциональность](#-функциональность)
-- [Примеры использования](#-примеры-использования)
-- [Дорожная карта](#-дорожная-карта)
-- [Документация](#-документация)
-- [Вклад в проект](#-вклад-в-проект)
-
----
-
-## 🚀 О проекте
-
-**gofer** — это высокопроизводительный MCP (Model Context Protocol) сервер, который трансформирует способ взаимодействия AI-ассистентов с кодовыми базами. Система обеспечивает интеллектуальное индексирование, семантический поиск и токен-эффективное чтение кода, снижая потребление токенов на **50-70%** в типичных сценариях.
-
-### Ключевые возможности
-
-- 🔍 **Семантический поиск** с векторными эмбеддингами и re-ranking
-- 📊 **AST-парсинг** через tree-sitter (Rust, TypeScript, Python, Go, Vue)
-- 💾 **Гибридное хранилище**: SQLite (метаданные) + LanceDB (векторы)
-- ⚡ **Инкрементальная индексация** с file watcher (в 50-100 раз быстрее)
-- 🎯 **Токен-эффективные инструменты**: skeleton, context_bundle, read_function_context
-- 🔄 **Batch operations**: множественные запросы в один вызов
-- 🧠 **LRU кэш** на стороне сервера для снижения повторных запросов
-- 🛡️ **Circuit breakers** и graceful error recovery
-- 📈 **Prometheus метрики** (порт 9091)
+- [About](#-about)
+- [Why gofer?](#-why-gofer)
+- [Tech Stack](#-tech-stack)
+- [Current Stage](#-current-stage)
+- [Installation](#-installation)
+- [Features](#-features)
+- [Usage Examples](#-usage-examples)
+- [Roadmap](#-roadmap)
+- [Documentation](#-documentation)
+- [Contributing](#-contributing)
 
 ---
 
-## 💡 Зачем нужен gofer?
+## 🚀 About
 
-### Проблемы существующих решений
+**gofer** is a high-performance MCP (Model Context Protocol) server that transforms how AI assistants interact with codebases. The system provides intelligent indexing, semantic search, and token-efficient code reading, reducing token consumption by **50-70%** in typical scenarios.
 
-1. **Избыточное потребление токенов**: чтение целых файлов вместо необходимых фрагментов
-2. **Медленная индексация**: full-scan на каждое изменение
-3. **Отсутствие контекста**: нет понимания связей между символами и файлами
-4. **Низкая точность поиска**: keyword-based поиск без семантики
+The name comes from "go for this, go for that" - a helper who does all the small tasks.
 
-### Решение gofer
+### Key Features
 
-- **50-70% экономия токенов** через `skeleton`, `read_function_context`, `read_types_only`
-- **Инкрементальная индексация**: только измененные файлы
-- **Семантический поиск**: векторные эмбеддинги + BGE-reranker + гибридный режим
-- **Граф зависимостей**: отслеживание связей между символами, файлами и импортами
-- **Кэширование**: LRU cache с TTL и автоинвалидацией
-- **Batch API**: сокращение latency в 3-5 раз
+- 🔍 **Semantic search** with vector embeddings and re-ranking
+- 📊 **AST parsing** via tree-sitter (Rust, TypeScript, Python, Go, Vue)
+- 💾 **Hybrid storage**: SQLite (metadata) + LanceDB (vectors)
+- ⚡ **Incremental indexing** with file watcher (50-100× faster)
+- 🎯 **Token-efficient tools**: skeleton, context_bundle, read_function_context
+- 🔄 **Batch operations**: multiple requests in one call
+- 🧠 **LRU cache** on server side to reduce repeated queries
+- 🛡️ **Circuit breakers** and graceful error recovery
+- 📈 **Prometheus metrics** (port 9091)
 
 ---
 
-## 🛠 Технологический стек
+## 💡 Why gofer?
 
-### Язык и рантайм
+### Problems with Existing Solutions
+
+1. **Excessive token consumption**: reading entire files instead of necessary fragments
+2. **Slow indexing**: full-scan on every change
+3. **Lack of context**: no understanding of relationships between symbols and files
+4. **Low search accuracy**: keyword-based search without semantics
+
+### gofer Solution
+
+- **50-70% token savings** via `skeleton`, `read_function_context`, `read_types_only`
+- **Incremental indexing**: only changed files
+- **Semantic search**: vector embeddings + BGE-reranker + hybrid mode
+- **Dependency graph**: tracking relationships between symbols, files, and imports
+- **Caching**: LRU cache with TTL and auto-invalidation
+- **Batch API**: 3-5× latency reduction
+
+---
+
+## 🛠 Tech Stack
+
+### Language and Runtime
 
 - **Rust 2021 edition** (1.76+)
-- **Tokio** — асинхронный рантайм с многопоточностью
-- **jemalloc** — оптимизированный аллокатор памяти
+- **Tokio** — async runtime with multi-threading
+- **jemalloc** — optimized memory allocator
 
-### Парсинг и индексация
+### Parsing and Indexing
 
-- **tree-sitter** (v0.24) — инкрементальный AST-парсер
-  - Поддержка: Rust, TypeScript, Python, Go, HTML/Vue
-- **SQLite** (sqlx v0.8) — реляционная БД для метаданных
-  - Символы, файлы, референсы, dependencies, diagnostics
-- **LanceDB** (v0.23) — векторная БД для эмбеддингов
+- **tree-sitter** (v0.24) — incremental AST parser
+  - Support: Rust, TypeScript, Python, Go, HTML/Vue
+- **SQLite** (sqlx v0.8) — relational DB for metadata
+  - Symbols, files, references, dependencies, diagnostics
+- **LanceDB** (v0.23) — vector DB for embeddings
 
-### Embeddings и семантический поиск
+### Embeddings and Semantic Search
 
-- **fastembed** (v5) — быстрые эмбеддинги
-  - Модель: `BGESmallENV15` (384-мерные векторы)
-- **ONNX Runtime** (ort v2.0-rc.11) — re-ranking модель
-  - Cross-encoder для точного ранжирования результатов
-- **ndarray** — матричные операции для scoring
+- **fastembed** (v5) — fast embeddings
+  - Model: `BGESmallENV15` (384-dimensional vectors)
+- **ONNX Runtime** (ort v2.0-rc.11) — re-ranking model
+  - Cross-encoder for accurate result ranking
+- **ndarray** — matrix operations for scoring
 
-### Git и файловая система
+### Git and Filesystem
 
-- **git2** (v0.20) — libgit2 bindings для анализа истории
-- **notify** (v7) + **debouncer** — file watcher с дебаунсингом
-- **ignore** (v0.4) — парсинг `.gitignore` правил
+- **git2** (v0.20) — libgit2 bindings for history analysis
+- **notify** (v7) + **debouncer** — file watcher with debouncing
+- **ignore** (v0.4) — `.gitignore` rules parsing
 
-### IPC и протокол
+### IPC and Protocol
 
-- **Unix Domain Sockets** — межпроцессное взаимодействие
+- **Unix Domain Sockets** — inter-process communication
 - **JSON-RPC 2.0** — MCP protocol
-- **serde_json** — сериализация данных
+- **serde_json** — data serialization
 
-### Оптимизации
+### Optimizations
 
-- **rkyv** (v0.7) — zero-copy сериализация для кэша
-- **blake3** — быстрое хеширование для content-addressable storage
-- **rayon** — параллельная обработка файлов
+- **rkyv** (v0.7) — zero-copy serialization for cache
+- **blake3** — fast hashing for content-addressable storage
+- **rayon** — parallel file processing
 
 ---
 
-## 📍 Текущая стадия
+## 📍 Current Stage
 
-### Статус: **MVP — Тестирование концепции**
+### Status: **MVP — Proof of Concept**
 
-Проект находится на стадии активной разработки и тестирования архитектурных решений. Реализованы базовые возможности, ведется сбор метрик и оптимизация производительности.
+The project is in active development and testing architectural decisions. Basic features are implemented, metrics are being collected, and performance is being optimized.
 
-#### Что работает сейчас ✅
+#### What Works Now ✅
 
-- ✅ Daemon-архитектура с Unix socket IPC
+- ✅ Daemon architecture with Unix socket IPC
 - ✅ MCP protocol bridge (stdio ↔ daemon)
-- ✅ Tree-sitter парсинг для Rust, TS, Python, Go, Vue
-- ✅ SQLite + LanceDB гибридное хранилище
-- ✅ Семантический поиск с reranking
-- ✅ Инкрементальная индексация с file watcher
-- ✅ Токен-эффективные инструменты (skeleton, context bundle)
+- ✅ Tree-sitter parsing for Rust, TS, Python, Go, Vue
+- ✅ SQLite + LanceDB hybrid storage
+- ✅ Semantic search with reranking
+- ✅ Incremental indexing with file watcher
+- ✅ Token-efficient tools (skeleton, context bundle)
 - ✅ Batch operations API
-- ✅ LRU cache с TTL
+- ✅ LRU cache with TTL
 - ✅ Git integration (blame, history, diff)
-- ✅ Prometheus метрики
+- ✅ Prometheus metrics
 
-#### В разработке 🚧
+#### In Development 🚧
 
-- 🚧 Rust-analyzer LSP интеграция
+- 🚧 Rust-analyzer LSP integration
 - 🚧 Content-addressable storage (hash buffers)
-- 🚧 Atomic transactions для файловых операций
-- 🚧 Execution sandbox (безопасное выполнение кода)
+- 🚧 Atomic transactions for file operations
+- 🚧 Execution sandbox (safe code execution)
 - 🚧 Smart commit generation
 
-#### Известные ограничения ⚠️
+#### Known Limitations ⚠️
 
-- Поддержка только Linux (требуется Unix socket)
-- Отсутствие GPU ускорения для embeddings (только CPU)
-- Нет web UI для мониторинга (только Prometheus метрики)
-- Ограниченная поддержка monorepo (один проект = одна директория)
+- Linux-only support (requires Unix socket)
+- No GPU acceleration for embeddings (CPU only)
+- No web UI for monitoring (Prometheus metrics only)
+- Limited monorepo support (one project = one directory)
 
 ---
 
-## 📦 Установка и запуск
+## 📦 Installation
 
-### Требования
+### Requirements
 
-#### Системные требования
+#### System Requirements
 
-- **ОС**: Linux (x86_64)
-- **CPU**: 4+ ядра (рекомендуется 8+)
-- **RAM**: 4 GB минимум, 8+ GB рекомендуется
-- **Диск**: 2 GB для хранения индекса среднего проекта
+- **OS**: Linux (x86_64)
+- **CPU**: 4+ cores (8+ recommended)
+- **RAM**: 4 GB minimum, 8+ GB recommended
+- **Disk**: 2 GB for average project index storage
 
-#### Софтверные зависимости
+#### Software Dependencies
 
-- **Rust**: 1.76 или новее
-- **Git**: 2.30+ (для git integration)
-- **SQLite**: 3.35+ (встроена в sqlx)
+- **Rust**: 1.76 or newer
+- **Git**: 2.30+ (for git integration)
+- **SQLite**: 3.35+ (embedded in sqlx)
 
-### Сборка из исходников
+### Building from Source
 
 ```bash
-# Клонирование репозитория
-git clone https://github.com/your-org/gofer.git
+# Clone repository
+git clone https://github.com/pa-khan/gofer.git
 cd gofer
 
-# Быстрая сборка для разработки
+# Fast build for development
 cargo build --profile release-dev
 
-# Финальная release-сборка (медленнее, но максимальная оптимизация)
+# Final release build (slower, but maximum optimization)
 cargo build --release
 
-# Установка бинарника
+# Install binary
 cargo install --path .
 ```
 
-### Быстрый старт
+### Quick Start
 
 ```bash
-# 1. Инициализация и запуск daemon + регистрация проекта
+# 1. Initialize daemon + register project
 cd /path/to/your/project
 gofer hi
 
-# 2. Проверка статуса
+# 2. Check status
 gofer status
 
-# 3. Запуск MCP сервера (для использования с Qoder или другими MCP клиентами)
+# 3. Run MCP server (for use with Qoder or other MCP clients)
 gofer mcp
 
-# 4. Просмотр логов
+# 4. View logs
 gofer logs -n 100 --follow
 
-# 5. Остановка daemon
+# 5. Stop daemon
 gofer stop
 ```
 
-### Альтернативные команды
+### Alternative Commands
 
 ```bash
-# Только запуск daemon (без регистрации проекта)
+# Start daemon only (without project registration)
 gofer daemon
 
-# Регистрация проекта без активации
+# Register project without activation
 gofer init
 
-# Активация проекта с индексацией
+# Activate project with indexing
 gofer start --watch
 
-# Принудительная переиндексация
+# Force reindex
 gofer reindex --force
 
-# Поиск в кодовой базе
+# Search codebase
 gofer search "authentication logic" --limit 10
 
-# Просмотр метрик
+# View metrics
 curl http://localhost:9091/metrics
 ```
 
-### Конфигурация
+### Configuration
 
 ```bash
-# Создание конфигурационного файла .gofer/config.toml
+# Create config file .gofer/config.toml
 gofer config init
 
-# Просмотр текущей конфигурации
+# View current configuration
 gofer config
 
-# Путь к файлу конфигурации
+# Config file path
 gofer config path
 ```
 
-Пример конфигурации:
+Example configuration:
 
 ```toml
 [server]
@@ -259,110 +264,110 @@ temperature = 0.3
 
 ---
 
-## 🎯 Функциональность
+## 🎯 Features
 
-Полный список из **100+ MCP tools**, доступных через JSON-RPC протокол:
+Complete list of **100+ MCP tools** available via JSON-RPC protocol:
 
-| Категория | Tool | Описание |
-|-----------|------|----------|
-| **Индексация и здоровье** | `get_index_status` | Статус индекса с метриками полноты |
-| | `validate_index` | Проверка целостности индекса |
-| | `force_reindex` | Принудительная переиндексация (file/dir/project) |
-| | `health_check` | Проверка здоровья всех компонентов |
-| **Семантический поиск** | `search` | Гибридный поиск с векторами + keywords + reranking |
-| | `search_by_purpose` | Поиск файлов по назначению (архитектурные запросы) |
-| | `search_symbols` | Поиск символов по имени (подстрочное совпадение) |
-| | `search_files` | Regex-поиск по содержимому файлов |
-| | `cross_stack_search` | Поиск с cross-stack корреляцией (backend ↔ frontend) |
-| **Токен-эффективное чтение** | `skeleton` | Только сигнатуры без тел функций (экономия 3-5×) |
-| | `read_function_context` | Одна функция + её зависимости (экономия 90-95%) |
-| | `read_types_only` | Только определения типов (экономия 90-95%) |
-| | `read_file` | Чтение файла с опциональным line range |
-| | `context_bundle` | Файл + его зависимости с опциональным skeletonization |
-| **Символы и референсы** | `get_symbols` | Список символов (функции, структуры, классы) |
-| | `get_references` | Все референсы на символ (где используется) |
-| | `get_callers` | Кто вызывает данный символ (incoming refs) |
-| | `get_callees` | Что вызывает данный символ (outgoing refs) |
-| | `symbol_exists` | Легковесная проверка существования символа |
-| | `is_exported` | Проверка публичности символа |
-| | `has_documentation` | Наличие doc-комментариев |
-| **Зависимости и граф** | `get_dependencies` | Зависимости из Cargo.toml/package.json |
-| | `dependency_impact` | Все файлы, использующие зависимость |
-| | `get_api_routes` | Список API endpoints (backend + frontend) |
-| | `domain_stats` | Статистика распределения кода по доменам |
-| **Git интеграция** | `git_blame` | Информация о коммите для строки |
-| | `git_history` | История коммитов для файла |
-| | `git_diff` | Diff для staged/unstaged изменений |
-| | `suggest_commit` | Генерация commit message на основе diff |
-| **Диагностика** | `get_errors` | Ошибки компилятора (cargo check, tsc) |
-| | `run_diagnostics` | Запуск cargo check/tsc для обновления diagnostics |
-| | `run_check` | Запуск проверок без изменения файлов |
-| | `get_config_keys` | Конфигурационные ключи из .env.example |
-| | `has_tests_for` | Проверка наличия тестов для файла |
-| **Файловые операции** | `list_directory` | Список файлов и директорий (рекурсивно) |
-| | `project_tree` | Дерево проекта с .gitignore фильтрацией |
-| | `find_files` | Поиск файлов по glob-паттерну |
-| | `grep` | Regex-поиск по содержимому с line numbers |
-| | `get_file_metadata` | Метаданные файла (размер, mtime, строки) |
-| | `file_exists` | Легковесная проверка существования файла |
-| | `write_file` | Создание/перезапись файла |
-| | `patch_file` | Точная замена подстроки (search & replace) |
-| | `append_to_file` | Добавление в конец файла |
-| | `move_file` | Перемещение/переименование файла |
-| | `create_directory` | Создание директории (с mkdir -p) |
-| **Trash management** | `delete_safe` | Безопасное удаление в корзину (с метаданными) |
-| | `list_trash` | Содержимое корзины |
-| | `restore` | Восстановление из корзины |
-| | `purge_trash` | Окончательное удаление из корзины |
-| **Транзакции** | `begin_transaction` | Начать атомарную транзакцию |
-| | `add_operation` | Добавить операцию в транзакцию |
-| | `commit_transaction` | Применить все операции атомарно |
-| | `rollback_transaction` | Отменить транзакцию без применения |
-| | `list_transactions` | Список активных транзакций |
-| **Форматирование и линтинг** | `format_file` | Автоформатирование (rustfmt, prettier, black) |
-| | `lint_file` | Линтинг (clippy, eslint, ruff) |
-| | `apply_lint_fix` | Применение auto-fix от линтера |
-| | `verify_patch` | Проверка патча компилятором (без изменений) |
-| **Content-addressable storage** | `extract_to_hash` | Извлечь блок кода в хеш (экономия токенов) |
-| | `insert_hash` | Вставить код из хеша по line number |
-| | `replace_with_hash` | Заменить блок кода из хеша |
-| | `content_to_hash` | Преобразовать контент в хеш |
-| | `list_buffers` | Список активных хешей в памяти |
-| | `clear_buffer` | Очистить буфер хешей |
-| **Sandbox execution** | `execute_code` | Выполнить код в изолированной среде |
-| | `execute_function` | Выполнить конкретную функцию с аргументами |
-| **Batch operations** | `batch_operations` | Множественные read/search операции за один запрос |
-| **Оптимизация** | `smart_file_selection` | AI-подсказки для выбора релевантных файлов |
-| | `get_cache_stats` | Статистика кэша (hit rate, размеры) |
-| **Проект** | `add_rule` | Добавить правило/best practice в контекст |
-| | `mark_golden_sample` | Пометить файл как эталонный пример |
-| | `get_summary` | AI-саммари назначения файла |
-| | `get_vue_tree` | DOM-дерево Vue компонента |
-| **Language services** | `lang_tools_list` | Список language-specific инструментов |
-| | `lang_tools_call` | Вызов language-specific tool (Vue, Rust LSP и т.д.) |
+| Category | Tool | Description |
+|----------|------|-------------|
+| **Index Health** | `get_index_status` | Index status with completeness metrics |
+| | `validate_index` | Index integrity check |
+| | `force_reindex` | Force reindex (file/dir/project) |
+| | `health_check` | Health check for all components |
+| **Semantic Search** | `search` | Hybrid search with vectors + keywords + reranking |
+| | `search_by_purpose` | Search files by purpose (architectural queries) |
+| | `search_symbols` | Search symbols by name (substring matching) |
+| | `search_files` | Regex search in file contents |
+| | `cross_stack_search` | Search with cross-stack correlation (backend ↔ frontend) |
+| **Token-Efficient Reading** | `skeleton` | Signatures only without function bodies (3-5× savings) |
+| | `read_function_context` | One function + its dependencies (90-95% savings) |
+| | `read_types_only` | Type definitions only (90-95% savings) |
+| | `read_file` | Read file with optional line range |
+| | `context_bundle` | File + dependencies with optional skeletonization |
+| **Symbols & References** | `get_symbols` | List symbols (functions, structs, classes) |
+| | `get_references` | All references to a symbol (where it's used) |
+| | `get_callers` | Who calls this symbol (incoming refs) |
+| | `get_callees` | What this symbol calls (outgoing refs) |
+| | `symbol_exists` | Lightweight symbol existence check |
+| | `is_exported` | Check if symbol is public |
+| | `has_documentation` | Check for doc comments |
+| **Dependencies & Graph** | `get_dependencies` | Dependencies from Cargo.toml/package.json |
+| | `dependency_impact` | All files using a dependency |
+| | `get_api_routes` | List API endpoints (backend + frontend) |
+| | `domain_stats` | Code distribution statistics by domain |
+| **Git Integration** | `git_blame` | Commit info for a line |
+| | `git_history` | Commit history for a file |
+| | `git_diff` | Diff for staged/unstaged changes |
+| | `suggest_commit` | Generate commit message based on diff |
+| **Diagnostics** | `get_errors` | Compiler errors (cargo check, tsc) |
+| | `run_diagnostics` | Run cargo check/tsc to update diagnostics |
+| | `run_check` | Run checks without modifying files |
+| | `get_config_keys` | Config keys from .env.example |
+| | `has_tests_for` | Check for tests for a file |
+| **File Operations** | `list_directory` | List files and directories (recursive) |
+| | `project_tree` | Project tree with .gitignore filtering |
+| | `find_files` | Find files by glob pattern |
+| | `grep` | Regex search in contents with line numbers |
+| | `get_file_metadata` | File metadata (size, mtime, lines) |
+| | `file_exists` | Lightweight file existence check |
+| | `write_file` | Create/overwrite file |
+| | `patch_file` | Precise substring replacement (search & replace) |
+| | `append_to_file` | Append to end of file |
+| | `move_file` | Move/rename file |
+| | `create_directory` | Create directory (with mkdir -p) |
+| **Trash Management** | `delete_safe` | Safe delete to trash (with metadata) |
+| | `list_trash` | Trash contents |
+| | `restore` | Restore from trash |
+| | `purge_trash` | Permanently delete from trash |
+| **Transactions** | `begin_transaction` | Start atomic transaction |
+| | `add_operation` | Add operation to transaction |
+| | `commit_transaction` | Apply all operations atomically |
+| | `rollback_transaction` | Cancel transaction without applying |
+| | `list_transactions` | List active transactions |
+| **Formatting & Linting** | `format_file` | Auto-format (rustfmt, prettier, black) |
+| | `lint_file` | Lint (clippy, eslint, ruff) |
+| | `apply_lint_fix` | Apply auto-fix from linter |
+| | `verify_patch` | Verify patch with compiler (no changes) |
+| **Content-Addressable Storage** | `extract_to_hash` | Extract code block to hash (token savings) |
+| | `insert_hash` | Insert code from hash by line number |
+| | `replace_with_hash` | Replace code block from hash |
+| | `content_to_hash` | Convert content to hash |
+| | `list_buffers` | List active hashes in memory |
+| | `clear_buffer` | Clear hash buffer |
+| **Sandbox Execution** | `execute_code` | Execute code in isolated environment |
+| | `execute_function` | Execute specific function with arguments |
+| **Batch Operations** | `batch_operations` | Multiple read/search operations in one request |
+| **Optimization** | `smart_file_selection` | AI hints for selecting relevant files |
+| | `get_cache_stats` | Cache statistics (hit rate, sizes) |
+| **Project** | `add_rule` | Add rule/best practice to context |
+| | `mark_golden_sample` | Mark file as reference example |
+| | `get_summary` | AI summary of file purpose |
+| | `get_vue_tree` | Vue component DOM tree |
+| **Language Services** | `lang_tools_list` | List language-specific tools |
+| | `lang_tools_call` | Call language-specific tool (Vue, Rust LSP, etc.) |
 
-### Специализированные инструменты (через `lang_tools_call`)
+### Specialized Tools (via `lang_tools_call`)
 
-#### Rust-analyzer tools (в разработке)
+#### Rust-analyzer tools (in development)
 
-- `rust_goto_definition` — переход к определению
-- `rust_find_references` — поиск всех референсов
-- `rust_hover` — тип и документация по символу
-- `rust_diagnostics` — диагностика от rust-analyzer
+- `rust_goto_definition` — go to definition
+- `rust_find_references` — find all references
+- `rust_hover` — type and documentation for symbol
+- `rust_diagnostics` — diagnostics from rust-analyzer
 - `rust_completions` — code completion
-- `rust_inlay_hints` — подсказки типов inline
-- `rust_code_actions` — quick fixes и рефакторинги
-- `rust_document_symbols` — outline файла
-- `rust_workspace_symbols` — поиск символов по workspace
-- `rust_goto_implementation` — переход к реализации trait
-- `rust_rename` — семантический рефакторинг (переименование)
-- `rust_expand_macro` — раскрытие макросов
+- `rust_inlay_hints` — inline type hints
+- `rust_code_actions` — quick fixes and refactorings
+- `rust_document_symbols` — file outline
+- `rust_workspace_symbols` — search symbols in workspace
+- `rust_goto_implementation` — go to trait implementation
+- `rust_rename` — semantic refactoring (rename)
+- `rust_expand_macro` — macro expansion
 
 ---
 
-## 📚 Примеры использования
+## 📚 Usage Examples
 
-### Пример 1: Семантический поиск
+### Example 1: Semantic Search
 
 ```bash
 # CLI
@@ -394,16 +399,16 @@ gofer search "error handling middleware" --limit 5
 }
 ```
 
-### Пример 2: Токен-эффективное чтение
+### Example 2: Token-Efficient Reading
 
 ```jsonc
-// Полный файл (3000 токенов)
+// Full file (3000 tokens)
 { "name": "read_file", "arguments": { "file": "src/main.rs" } }
 
-// Только сигнатуры (600 токенов, экономия 80%)
+// Signatures only (600 tokens, 80% savings)
 { "name": "skeleton", "arguments": { "file": "src/main.rs" } }
 
-// Одна функция + её deps (200 токенов, экономия 93%)
+// One function + deps (200 tokens, 93% savings)
 {
   "name": "read_function_context",
   "arguments": {
@@ -414,10 +419,10 @@ gofer search "error handling middleware" --limit 5
 }
 ```
 
-### Пример 3: Batch operations
+### Example 3: Batch Operations
 
 ```jsonc
-// Вместо 3 отдельных запросов — один batch call
+// Instead of 3 separate requests — one batch call
 {
   "name": "batch_operations",
   "arguments": {
@@ -431,13 +436,13 @@ gofer search "error handling middleware" --limit 5
 }
 ```
 
-### Пример 4: Атомарные транзакции
+### Example 4: Atomic Transactions
 
 ```jsonc
-// 1. Начать транзакцию
+// 1. Start transaction
 { "name": "begin_transaction", "arguments": { "transaction_id": "refactor-001" } }
 
-// 2. Добавить операции
+// 2. Add operations
 {
   "name": "add_operation",
   "arguments": {
@@ -453,110 +458,110 @@ gofer search "error handling middleware" --limit 5
   }
 }
 
-// 3. Commit (атомарное применение всех операций)
+// 3. Commit (atomic application of all operations)
 { "name": "commit_transaction", "arguments": { "transaction_id": "refactor-001" } }
 ```
 
 ---
 
-## 🗺 Дорожная карта
+## 🗺 Roadmap
 
-### Phase 0: Активное тестирование (текущая стадия) ✅
+### Phase 0: Active Testing (current stage) ✅
 
-**Цель**: Стабилизация MVP, сбор метрик, фикс критических багов
+**Goal**: MVP stabilization, metrics collection, critical bug fixes
 
-- ✅ Базовая функциональность (search, read, symbols)
-- ✅ Daemon архитектура с IPC
-- ✅ Инкрементальная индексация
-- 🚧 Rust-analyzer LSP интеграция
-- 🚧 Performance profiling и оптимизация
+- ✅ Basic functionality (search, read, symbols)
+- ✅ Daemon architecture with IPC
+- ✅ Incremental indexing
+- 🚧 Rust-analyzer LSP integration
+- 🚧 Performance profiling and optimization
 - 🚧 Comprehensive tests (unit + integration)
 
-**Метрики успеха**:
-- 95%+ completeness индекса
-- < 5s cold start для среднего проекта (10k files)
+**Success Metrics**:
+- 95%+ index completeness
+- < 5s cold start for average project (10k files)
 - 40%+ cache hit rate
-- 50-70% token savings в реальных сценариях
+- 50-70% token savings in real scenarios
 
 ---
 
-### Phase 1: Изоляция языков в Wasmtime (3-4 недели)
+### Phase 1: Language Isolation with Wasmtime (3-4 weeks)
 
-**Цель**: Безопасное выполнение пользовательского кода
+**Goal**: Safe user code execution
 
-**Задачи**:
-- Компиляция Rust/Python/JS кода в WASM
-- Wasmtime runtime с resource limits (CPU, memory, time)
-- Sandboxed file system через WASI
-- API для `execute_code` и `execute_function`
+**Tasks**:
+- Compile Rust/Python/JS code to WASM
+- Wasmtime runtime with resource limits (CPU, memory, time)
+- Sandboxed file system via WASI
+- API for `execute_code` and `execute_function`
 
 **Deliverables**:
-- ✨ Безопасное выполнение кода в изолированной среде
+- ✨ Safe code execution in isolated environment
 - ✨ Resource limits: 1 CPU core, 512 MB RAM, 5s timeout
-- ✨ Blocked syscalls: network, filesystem (кроме WASI)
+- ✨ Blocked syscalls: network, filesystem (except WASI)
 
-**Риски**:
-- Сложность компиляции в WASM для некоторых языков
-- Overhead на startup (mitigated: warm pool of instances)
+**Risks**:
+- Complexity of WASM compilation for some languages
+- Startup overhead (mitigated: warm pool of instances)
 
 ---
 
-### Phase 2: Оптимизации (4-6 недель)
+### Phase 2: Optimizations (4-6 weeks)
 
-**Цель**: Production-ready производительность и масштабируемость
+**Goal**: Production-ready performance and scalability
 
-**Backend оптимизации**:
-- Асинхронный embedder с batching и priority queue
+**Backend Optimizations**:
+- Async embedder with batching and priority queue
 - Incremental vector indexing (append-only LanceDB)
-- Query planner с cost estimation
-- Smart prefetching на основе access patterns
+- Query planner with cost estimation
+- Smart prefetching based on access patterns
 
-**Индекс оптимизации**:
+**Index Optimizations**:
 - Compressed embeddings (int8 quantization)
-- Bloom filters для symbol_exists
-- Inverted index для full-text search
-- Partitioning по языкам/директориям
+- Bloom filters for symbol_exists
+- Inverted index for full-text search
+- Partitioning by language/directory
 
-**Network оптимизации**:
-- HTTP/2 для MCP protocol (взамен Unix socket)
-- Streaming responses для больших результатов
-- Request deduplication (в пределах 100ms)
+**Network Optimizations**:
+- HTTP/2 for MCP protocol (instead of Unix socket)
+- Streaming responses for large results
+- Request deduplication (within 100ms)
 
-**Метрики успеха**:
-- < 1s latency для 95% запросов
-- 10k+ RPS на single daemon instance
-- < 100 MB RAM overhead на проект
+**Success Metrics**:
+- < 1s latency for 95% of requests
+- 10k+ RPS on single daemon instance
+- < 100 MB RAM overhead per project
 - 60%+ cache hit rate
 
 ---
 
-### Phase 3: Production (6-8 недель)
+### Phase 3: Production (6-8 weeks)
 
-**Цель**: Enterprise-ready deployment и мониторинг
+**Goal**: Enterprise-ready deployment and monitoring
 
 **Features**:
-- Multi-project support с изоляцией (namespaces)
-- Distributed indexing (master/worker архитектура)
+- Multi-project support with isolation (namespaces)
+- Distributed indexing (master/worker architecture)
 - High availability (leader election, failover)
-- Authentication и authorization (JWT/OAuth)
-- Rate limiting и quotas per user
-- Audit log для всех операций
+- Authentication and authorization (JWT/OAuth)
+- Rate limiting and quotas per user
+- Audit log for all operations
 
 **Observability**:
 - Structured JSON logging
 - Prometheus metrics (latency, throughput, errors)
 - Distributed tracing (OpenTelemetry)
-- Health checks и readiness probes
+- Health checks and readiness probes
 - Grafana dashboards
 
 **Operations**:
 - Docker image + Kubernetes manifests
-- Helm chart для deployment
+- Helm chart for deployment
 - CI/CD pipeline (GitHub Actions)
 - Database migrations strategy
-- Backup и restore procedures
+- Backup and restore procedures
 
-**Документация**:
+**Documentation**:
 - Production deployment guide
 - Security best practices
 - Troubleshooting runbook
@@ -564,20 +569,20 @@ gofer search "error handling middleware" --limit 5
 
 ---
 
-### Phase 4+: Advanced features (Future)
+### Phase 4+: Advanced Features (Future)
 
-**Потенциальные направления**:
-- Multi-language support расширение (Java, C++, PHP)
-- Machine learning модели для code completion
+**Potential Directions**:
+- Multi-language support expansion (Java, C++, PHP)
+- Machine learning models for code completion
 - Collaborative features (shared annotations, discussions)
 - IDE plugins (VSCode, IntelliJ, Neovim)
-- Cloud-hosted SaaS версия
+- Cloud-hosted SaaS version
 
 ---
 
-## 📖 Документация
+## 📖 Documentation
 
-### Структура документации
+### Documentation Structure
 
 ```
 docs/
@@ -593,76 +598,76 @@ docs/
 │   ├── IMPLEMENTATION_PLAN.md
 │   ├── ROADMAP.md
 │   └── OPTIMIZATION_OPPORTUNITIES.md
-└── QUICK_START_GUIDE.md      # Быстрый старт для пользователей
+└── QUICK_START_GUIDE.md      # Quick start for users
 ```
 
-### Полезные ссылки
+### Useful Links
 
-- **[Comprehensive Overview](docs/desc/OVERVIEW.md)** — полный обзор архитектуры и фич
-- **[Feature Index](docs/desc/INDEX.md)** — навигация по всем 48+ функциям
-- **[Implementation Plan](docs/next_stage/IMPLEMENTATION_PLAN.md)** — детальный план фаз 4-5
-- **[Quick Start](docs/QUICK_START_GUIDE.md)** — быстрый старт для новичков
+- **[Comprehensive Overview](docs/desc/OVERVIEW.md)** — complete architecture and features overview
+- **[Feature Index](docs/desc/INDEX.md)** — navigation through all 48+ features
+- **[Implementation Plan](docs/next_stage/IMPLEMENTATION_PLAN.md)** — detailed plan for phases 4-5
+- **[Quick Start](docs/QUICK_START_GUIDE.md)** — quick start for beginners
 
 ---
 
-## 🤝 Вклад в проект
+## 🤝 Contributing
 
-Мы приветствуем contributions от сообщества!
+We welcome contributions from the community!
 
-### Как помочь
+### How to Help
 
-1. **Тестирование MVP**: используйте gofer на ваших проектах и репортите баги
-2. **Документация**: улучшение гайдов, добавление примеров
-3. **Performance benchmarks**: сравнение с альтернативами
-4. **Feature requests**: предложения новых функций через GitHub Issues
+1. **MVP Testing**: use gofer on your projects and report bugs
+2. **Documentation**: improve guides, add examples
+3. **Performance benchmarks**: compare with alternatives
+4. **Feature requests**: suggest new features via GitHub Issues
 
-### Development setup
+### Development Setup
 
 ```bash
-# Клонирование с submodules
-git clone --recursive https://github.com/your-org/gofer.git
+# Clone with submodules
+git clone --recursive https://github.com/pa-khan/gofer.git
 cd gofer
 
-# Установка pre-commit hooks
+# Install pre-commit hooks
 cargo install cargo-watch
 cargo install cargo-nextest
 
-# Запуск тестов
+# Run tests
 cargo nextest run
 
-# Запуск в dev-режиме с hot reload
+# Run in dev mode with hot reload
 cargo watch -x 'run -- daemon'
 ```
 
-### Гайдлайны
+### Guidelines
 
-- Следуйте Rust style guide (rustfmt)
-- Добавляйте unit tests для новых функций
-- Документируйте публичные API в docstrings
-- Используйте conventional commits
+- Follow Rust style guide (rustfmt)
+- Add unit tests for new features
+- Document public APIs in docstrings
+- Use conventional commits
 
 ---
 
-## 📝 Лицензия
+## 📝 License
 
 MIT License. See [LICENSE](LICENSE) for details.
 
 ---
 
-## 🙏 Благодарности
+## 🙏 Acknowledgments
 
-- **tree-sitter** — за мощный инкрементальный парсер
-- **LanceDB** — за быструю векторную БД
-- **Tokio** — за production-ready async runtime
-- **Rust community** — за экосистему качественных библиотек
-
----
-
-## 📞 Контакты
-
-- **Issues**: [GitHub Issues](https://github.com/your-org/gofer/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/gofer/discussions)
+- **tree-sitter** — for the powerful incremental parser
+- **LanceDB** — for the fast vector database
+- **Tokio** — for the production-ready async runtime
+- **Rust community** — for the ecosystem of quality libraries
 
 ---
 
-**Сделано с ❤️ на Rust**
+## 📞 Contacts
+
+- **Issues**: [GitHub Issues](https://github.com/pa-khan/gofer/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/pa-khan/gofer/discussions)
+
+---
+
+**Made with ❤️ in Rust using [Qoder](https://qoder.com) and [Gemini](https://deepmind.google/technologies/gemini/)**

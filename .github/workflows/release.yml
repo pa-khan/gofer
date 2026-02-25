@@ -1,0 +1,292 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v0.1.0)'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - name: Get version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          release_name: Release ${{ steps.get_version.outputs.version }}
+          draft: false
+          prerelease: false
+
+  build-linux:
+    name: Build Linux ${{ matrix.target }}
+    needs: create-release
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-gnu
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.target }}-
+
+      - name: Build release binary
+        run: |
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Strip binary
+        if: matrix.target != 'x86_64-unknown-linux-musl'
+        run: |
+          strip target/${{ matrix.target }}/release/gofer
+
+      - name: Create tarball
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf gofer-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz gofer
+          mv gofer-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz ../../..
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./gofer-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz
+          asset_name: gofer-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz
+          asset_content_type: application/gzip
+
+  build-packages:
+    name: Build ${{ matrix.package }} packages
+    needs: create-release
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: [deb, rpm]
+        arch: [x86_64, aarch64]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deb
+        if: matrix.package == 'deb'
+        run: cargo install cargo-deb
+
+      - name: Install cargo-generate-rpm
+        if: matrix.package == 'rpm'
+        run: cargo install cargo-generate-rpm
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-pkg-${{ matrix.arch }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build binary for packaging
+        run: |
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            TARGET="aarch64-unknown-linux-gnu"
+            sudo apt-get update
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+            rustup target add $TARGET
+            cargo build --release --target $TARGET
+          else
+            cargo build --release
+          fi
+
+      - name: Create Debian package
+        if: matrix.package == 'deb'
+        run: |
+          # Создаем временную структуру для deb пакета
+          mkdir -p package/usr/local/bin
+          mkdir -p package/lib/systemd/system
+          mkdir -p package/DEBIAN
+          
+          # Копируем бинарник
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            cp target/aarch64-unknown-linux-gnu/release/gofer package/usr/local/bin/
+          else
+            cp target/release/gofer package/usr/local/bin/
+          fi
+          
+          # Создаем control файл
+          cat > package/DEBIAN/control << EOF
+          Package: gofer
+          Version: ${{ needs.create-release.outputs.version }}
+          Section: devel
+          Priority: optional
+          Architecture: ${{ matrix.arch == 'x86_64' && 'amd64' || 'arm64' }}
+          Maintainer: gofer developers
+          Description: Intelligent MCP server for Rust codebases
+           gofer is a high-performance MCP (Model Context Protocol) server
+           that provides intelligent indexing, semantic search, and token-efficient
+           code reading capabilities.
+          EOF
+          
+          # Создаем systemd service
+          cat > package/lib/systemd/system/gofer.service << EOF
+          [Unit]
+          Description=gofer MCP daemon
+          After=network.target
+          
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/gofer daemon
+          Restart=on-failure
+          
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          
+          # Собираем пакет
+          dpkg-deb --build package gofer_${{ needs.create-release.outputs.version }}_${{ matrix.arch == 'x86_64' && 'amd64' || 'arm64' }}.deb
+
+      - name: Create RPM package
+        if: matrix.package == 'rpm'
+        run: |
+          # Устанавливаем rpm-build
+          sudo apt-get update
+          sudo apt-get install -y rpm
+          
+          # Создаем структуру для rpmbuild
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          
+          # Создаем spec файл
+          cat > ~/rpmbuild/SPECS/gofer.spec << EOF
+          Name:           gofer
+          Version:        ${VERSION#v}
+          Release:        1%{?dist}
+          Summary:        Intelligent MCP server for Rust codebases
+          License:        MIT
+          URL:            https://github.com/pa-khan/gofer
+          
+          %description
+          gofer is a high-performance MCP (Model Context Protocol) server
+          that provides intelligent indexing, semantic search, and token-efficient
+          code reading capabilities.
+          
+          %install
+          mkdir -p %{buildroot}/usr/local/bin
+          mkdir -p %{buildroot}/lib/systemd/system
+          EOF
+          
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            echo "cp %{_builddir}/../../../target/aarch64-unknown-linux-gnu/release/gofer %{buildroot}/usr/local/bin/" >> ~/rpmbuild/SPECS/gofer.spec
+          else
+            echo "cp %{_builddir}/../../../target/release/gofer %{buildroot}/usr/local/bin/" >> ~/rpmbuild/SPECS/gofer.spec
+          fi
+          
+          cat >> ~/rpmbuild/SPECS/gofer.spec << EOF
+          
+          cat > %{buildroot}/lib/systemd/system/gofer.service << 'EOFSERVICE'
+          [Unit]
+          Description=gofer MCP daemon
+          After=network.target
+          
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/gofer daemon
+          Restart=on-failure
+          
+          [Install]
+          WantedBy=multi-user.target
+          EOFSERVICE
+          
+          %files
+          /usr/local/bin/gofer
+          /lib/systemd/system/gofer.service
+          
+          %changelog
+          * $(date "+%a %b %d %Y") gofer developers - ${VERSION#v}-1
+          - Release ${VERSION#v}
+          EOF
+          
+          # Собираем RPM
+          cd ~
+          rpmbuild -bb rpmbuild/SPECS/gofer.spec --target ${{ matrix.arch }}
+          
+          # Копируем результат
+          cp ~/rpmbuild/RPMS/${{ matrix.arch }}/gofer-*.rpm $GITHUB_WORKSPACE/
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+
+      - name: Upload DEB package
+        if: matrix.package == 'deb'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./gofer_${{ needs.create-release.outputs.version }}_${{ matrix.arch == 'x86_64' && 'amd64' || 'arm64' }}.deb
+          asset_name: gofer_${{ needs.create-release.outputs.version }}_${{ matrix.arch == 'x86_64' && 'amd64' || 'arm64' }}.deb
+          asset_content_type: application/vnd.debian.binary-package
+
+      - name: Upload RPM package
+        if: matrix.package == 'rpm'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./gofer-${{ needs.create-release.outputs.version }}-1.${{ matrix.arch }}.rpm
+          asset_name: gofer-${{ needs.create-release.outputs.version }}-1.${{ matrix.arch }}.rpm
+          asset_content_type: application/x-rpm
