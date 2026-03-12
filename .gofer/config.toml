@@ -1,0 +1,52 @@
+# gofer configuration
+# See: gofer config --help
+
+[server]
+port = 10987
+
+[indexer]
+# Directories and patterns to exclude from indexing
+ignore = [
+    "**/node_modules/**",
+    "**/target/**",
+    "**/.git/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/.next/**",
+    "**/.nuxt/**",
+    "**/.cache/**",
+    "**/coverage/**",
+    "**/__pycache__/**",
+    "**/.pytest_cache/**",
+    "**/vendor/**",
+    "**/.venv/**",
+    "**/venv/**",
+    "**/out/**",
+    "**/.idea/**",
+    "**/.vscode/**",
+    "**/tmp/**",
+    "**/temp/**",
+]
+parallel_workers = 4
+
+[embedding]
+batch_size = 32
+model = "NomicEmbedTextV15"
+pool_size = 4
+
+[reranker]
+enabled = true
+model_dir = ".gofer/data/models/reranker"
+
+[summarizer]
+enable_llm = true
+model_id = "qwen2.5-coder:1.5b"
+max_tokens = 150
+temperature = 0.3
+
+[domains]
+rs_paths = []
+py_paths = []
+frontend_paths = []
+ops_paths = []
+shared_paths = []

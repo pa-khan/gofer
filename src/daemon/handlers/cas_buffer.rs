@@ -197,13 +197,17 @@ pub async fn tool_insert_clipboard(args: Value, ctx: &ToolContext) -> Result<Val
     // Get buffer content
     let buffer_content = {
         let mut buffers = BUFFERS.write().await;
-        let buffer = buffers
-            .get_mut(clipboard_id)
-            .ok_or_else(|| GoferError::InvalidParams(format!("Clipboard item not found: {}", clipboard_id)))?;
+        let buffer = buffers.get_mut(clipboard_id).ok_or_else(|| {
+            GoferError::InvalidParams(format!("Clipboard item not found: {}", clipboard_id))
+        })?;
 
         // Check expiration
         if Utc::now() > buffer.expires_at {
-            return Err(GoferError::InvalidParams(format!("Clipboard item expired: {}", clipboard_id)).into());
+            return Err(GoferError::InvalidParams(format!(
+                "Clipboard item expired: {}",
+                clipboard_id
+            ))
+            .into());
         }
 
         // Increment access count
@@ -286,12 +290,16 @@ pub async fn tool_replace_with_clipboard(args: Value, ctx: &ToolContext) -> Resu
     // Get buffer content
     let buffer_content = {
         let mut buffers = BUFFERS.write().await;
-        let buffer = buffers
-            .get_mut(clipboard_id)
-            .ok_or_else(|| GoferError::InvalidParams(format!("Clipboard item not found: {}", clipboard_id)))?;
+        let buffer = buffers.get_mut(clipboard_id).ok_or_else(|| {
+            GoferError::InvalidParams(format!("Clipboard item not found: {}", clipboard_id))
+        })?;
 
         if Utc::now() > buffer.expires_at {
-            return Err(GoferError::InvalidParams(format!("Clipboard item expired: {}", clipboard_id)).into());
+            return Err(GoferError::InvalidParams(format!(
+                "Clipboard item expired: {}",
+                clipboard_id
+            ))
+            .into());
         }
 
         buffer.access_count += 1;
