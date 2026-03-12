@@ -179,41 +179,14 @@ pub async fn tool_search(args: Value, ctx: &ToolContext) -> Result<Value> {
             });
     }
 
-    let mut fused: Vec<FusedHit> = scores.into_values().collect();
+    let fused: Vec<FusedHit> = scores.into_values().collect();
+    let mut fused = fused;
     fused.sort_by(|a, b| {
         b.rrf_score
             .partial_cmp(&a.rrf_score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     fused.truncate(limit * 2); // Keep extra for filtering
-
-    // 4. Rerank if available
-    let fused = if let Some(reranker) = ctx.reranker.as_ref() {
-        let docs: Vec<String> = fused.iter().map(|h| h.content.clone()).collect();
-        match reranker.rerank(query, &docs, limit * 2) {
-            Ok(ranked) => ranked
-                .into_iter()
-                .map(|(idx, _)| {
-                    let h = &fused[idx];
-                    FusedHit {
-                        file_path: h.file_path.clone(),
-                        line_start: h.line_start,
-                        content: h.content.clone(),
-                        rrf_score: h.rrf_score,
-                        vector_score: h.vector_score,
-                        matched_symbol: h.matched_symbol.clone(),
-                        symbol_kind: h.symbol_kind,
-                    }
-                })
-                .collect(),
-            Err(e) => {
-                tracing::warn!("Reranking failed, returning fused results: {}", e);
-                fused
-            }
-        }
-    } else {
-        fused
-    };
 
     // 5. Filter by path/glob if specified - NOW ONLY FOR GLOB
     let glob_filter = args.get("glob").and_then(|v| v.as_str());
@@ -281,44 +254,25 @@ pub async fn tool_search(args: Value, ctx: &ToolContext) -> Result<Value> {
                 &default_content
             };
 
-            let mut result = json!({
-                "file_path": make_relative(&ctx.root_path, &hit.file_path),
-                "line_start": hit.line_start,
-                "content": content_str
-            });
+            let mut parts = vec![format!(
+                "{}:{}",
+                make_relative(&ctx.root_path, &hit.file_path),
+                hit.line_start
+            )];
 
-            // Add optional fields based on parameters
             if include_scores {
-                result.as_object_mut().unwrap().insert(
-                    "score".to_string(),
-                    json!(format!("{:.3}", normalized_score)),
-                );
+                parts.push(format!("[score={:.3}]", normalized_score));
             }
-
             if include_scores || preview_mode {
                 if let Some(reason) = &match_reason {
-                    result
-                        .as_object_mut()
-                        .unwrap()
-                        .insert("match_reason".to_string(), json!(reason));
+                    parts.push(format!("(reason:{})", reason));
                 }
             }
-
             if let Some(ctx_val) = context {
-                result
-                    .as_object_mut()
-                    .unwrap()
-                    .insert("context".to_string(), json!(ctx_val));
+                parts.push(format!("(ctx:{})", ctx_val));
             }
 
-            if preview_mode {
-                if let Some(prev) = preview {
-                    result
-                        .as_object_mut()
-                        .unwrap()
-                        .insert("preview".to_string(), json!(prev));
-                }
-            }
+            let result = json!(format!("{}\n{}", parts.join(" "), content_str));
 
             (normalized_score, result)
         })
@@ -343,14 +297,10 @@ pub async fn tool_search(args: Value, ctx: &ToolContext) -> Result<Value> {
 
     // Add degraded mode information if applicable
     if degraded {
-        final_result
-            .as_object_mut()
-            .unwrap()
-            .insert("degraded".to_string(), json!(true));
-        final_result
-            .as_object_mut()
-            .unwrap()
-            .insert("warnings".to_string(), json!(warnings));
+        if let Some(obj) = final_result.as_object_mut() {
+            obj.insert("degraded".to_string(), json!(true));
+            obj.insert("warnings".to_string(), json!(warnings));
+        }
     }
 
     // NEW: Feature 008 - Store in cache (only if not degraded for best quality)
@@ -419,14 +369,15 @@ pub async fn tool_cross_stack_search(args: Value, ctx: &ToolContext) -> Result<V
         for link in &file_links {
             let key = format!("{}->{}", link.source_symbol, link.target_symbol);
             if seen_links.insert(key) {
-                links.push(json!({
-                    "source_file": make_relative(&ctx.root_path, &link.source_file),
-                    "source_symbol": link.source_symbol,
-                    "target_file": make_relative(&ctx.root_path, &link.target_file),
-                    "target_symbol": link.target_symbol,
-                    "link_type": link.link_type,
-                    "weight": (link.weight * 100.0).round() / 100.0
-                }));
+                links.push(json!(format!(
+                    "{}:{} -> {}:{} ({}) [w={:.2}]",
+                    make_relative(&ctx.root_path, &link.source_file),
+                    link.source_symbol,
+                    make_relative(&ctx.root_path, &link.target_file),
+                    link.target_symbol,
+                    link.link_type,
+                    link.weight
+                )));
             }
         }
     }
@@ -519,11 +470,7 @@ pub async fn tool_search_by_purpose(args: Value, ctx: &ToolContext) -> Result<Va
                 .get(file_path)
                 .map(|s| s.as_str())
                 .unwrap_or("(no summary)");
-            json!({
-                "file_path": make_relative(&ctx.root_path, file_path),
-                "score": (*score * 10000.0).round() / 10000.0,
-                "summary": summary
-            })
+            format!("{} [score={:.4}] - {}", make_relative(&ctx.root_path, file_path), score, summary)
         }).collect::<Vec<_>>()
     }))
 }
@@ -616,21 +563,26 @@ pub async fn tool_smart_file_selection(args: Value, ctx: &ToolContext) -> Result
         // Extract key symbols
         let key_symbols: Vec<String> = symbols.iter().map(|s| s.name.clone()).take(5).collect();
 
+        let summ_str = summary
+            .map(|s| {
+                if s.summary.len() > 150 {
+                    format!("{}...", &s.summary[..147])
+                } else {
+                    s.summary
+                }
+            })
+            .unwrap_or_default();
+
         candidates.push((
             final_score,
-            json!({
-                "path": make_relative(&ctx.root_path, &file_path),
-                "score": format!("{:.3}", final_score),
-                "reason": reason,
-                "summary": summary.map(|s| {
-                    if s.summary.len() > 150 {
-                        format!("{}...", &s.summary[..147])
-                    } else {
-                        s.summary
-                    }
-                }),
-                "key_symbols": key_symbols
-            }),
+            json!(format!(
+                "{} [score={:.3}]\nReason: {}\nSymbols: {}\nSummary: {}",
+                make_relative(&ctx.root_path, &file_path),
+                final_score,
+                reason,
+                key_symbols.join(", "),
+                summ_str
+            )),
         ));
     }
 

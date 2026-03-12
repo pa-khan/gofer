@@ -4,7 +4,7 @@ use tokio::sync::{Mutex, RwLock};
 
 use crate::cache::CacheManager;
 use crate::error_recovery::CircuitBreaker;
-use crate::indexer::{EmbedderPool, Reranker};
+use crate::indexer::EmbedderPool;
 use crate::languages::{rust_analyzer::RustAnalyzer, LanguageService};
 use crate::storage::{LanceStorage, SqliteStorage};
 
@@ -14,7 +14,6 @@ pub struct ToolContext {
     pub sqlite: Arc<SqliteStorage>,
     pub lance: Arc<Mutex<LanceStorage>>,
     pub embedder: Arc<EmbedderPool>,
-    pub reranker: Arc<Option<Reranker>>,
     pub root_path: Arc<PathBuf>,
     pub cache: Arc<CacheManager>,
     pub embedding_circuit: Arc<CircuitBreaker>,

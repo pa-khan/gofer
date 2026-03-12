@@ -40,13 +40,14 @@ pub async fn tool_rust_goto_definition(args: Value, ctx: &ToolContext) -> Result
     let results: Vec<_> = locations
         .into_iter()
         .map(|loc| {
-            json!({
-                "file": loc.uri.path().as_str(),
-                "line": loc.range.start.line,
-                "character": loc.range.start.character,
-                "end_line": loc.range.end.line,
-                "end_character": loc.range.end.character,
-            })
+            format!(
+                "{}:{}:{}-{}:{}",
+                loc.uri.path(),
+                loc.range.start.line,
+                loc.range.start.character,
+                loc.range.end.line,
+                loc.range.end.character
+            )
         })
         .collect();
 
@@ -93,13 +94,14 @@ pub async fn tool_rust_find_references(args: Value, ctx: &ToolContext) -> Result
     let results: Vec<_> = locations
         .into_iter()
         .map(|loc| {
-            json!({
-                "file": loc.uri.path().as_str(),
-                "line": loc.range.start.line,
-                "character": loc.range.start.character,
-                "end_line": loc.range.end.line,
-                "end_character": loc.range.end.character,
-            })
+            format!(
+                "{}:{}:{}-{}:{}",
+                loc.uri.path(),
+                loc.range.start.line,
+                loc.range.start.character,
+                loc.range.end.line,
+                loc.range.end.character
+            )
         })
         .collect();
 
@@ -201,25 +203,33 @@ pub async fn tool_rust_diagnostics(args: Value, ctx: &ToolContext) -> Result<Val
     let results: Vec<_> = diagnostics
         .into_iter()
         .map(|diag| {
-            json!({
-                "message": diag.message,
-                "severity": match diag.severity {
-                    Some(lsp_types::DiagnosticSeverity::ERROR) => "error",
-                    Some(lsp_types::DiagnosticSeverity::WARNING) => "warning",
-                    Some(lsp_types::DiagnosticSeverity::INFORMATION) => "info",
-                    Some(lsp_types::DiagnosticSeverity::HINT) => "hint",
-                    _ => "unknown",
-                },
-                "line": diag.range.start.line,
-                "character": diag.range.start.character,
-                "end_line": diag.range.end.line,
-                "end_character": diag.range.end.character,
-                "code": diag.code.map(|c| match c {
+            let sev = match diag.severity {
+                Some(lsp_types::DiagnosticSeverity::ERROR) => "error",
+                Some(lsp_types::DiagnosticSeverity::WARNING) => "warning",
+                Some(lsp_types::DiagnosticSeverity::INFORMATION) => "info",
+                Some(lsp_types::DiagnosticSeverity::HINT) => "hint",
+                _ => "unknown",
+            };
+            let code = diag
+                .code
+                .map(|c| match c {
                     lsp_types::NumberOrString::Number(n) => n.to_string(),
                     lsp_types::NumberOrString::String(s) => s,
-                }),
-                "source": diag.source,
-            })
+                })
+                .map(|c| format!(" {}", c))
+                .unwrap_or_default();
+
+            format!(
+                "{}:{}-{}:{} [{}]{} {} ({})",
+                diag.range.start.line + 1,
+                diag.range.start.character + 1,
+                diag.range.end.line + 1,
+                diag.range.end.character + 1,
+                sev,
+                code,
+                diag.message,
+                diag.source.unwrap_or_default()
+            )
         })
         .collect();
 
@@ -260,16 +270,8 @@ pub async fn tool_rust_completions(args: Value, ctx: &ToolContext) -> Result<Val
     let results: Vec<_> = items
         .into_iter()
         .map(|item| {
-            json!({
-                "label": item.label,
-                "kind": format!("{:?}", item.kind),
-                "detail": item.detail,
-                "documentation": item.documentation.map(|doc| match doc {
-                    lsp_types::Documentation::String(s) => s,
-                    lsp_types::Documentation::MarkupContent(markup) => markup.value,
-                }),
-                "insert_text": item.insert_text,
-            })
+            let detail = item.detail.map(|d| format!(" - {}", d)).unwrap_or_default();
+            format!("{} ({:?}){}", item.label, item.kind, detail)
         })
         .collect();
 
@@ -319,12 +321,13 @@ pub async fn tool_rust_inlay_hints(args: Value, ctx: &ToolContext) -> Result<Val
                     .join(""),
             };
 
-            json!({
-                "label": label,
-                "kind": format!("{:?}", hint.kind),
-                "line": hint.position.line,
-                "character": hint.position.character,
-            })
+            format!(
+                "{}:{} [{:?}] {}",
+                hint.position.line + 1,
+                hint.position.character + 1,
+                hint.kind,
+                label
+            )
         })
         .collect();
 
@@ -376,17 +379,19 @@ pub async fn tool_rust_code_actions(args: Value, ctx: &ToolContext) -> Result<Va
         .into_iter()
         .map(|action| match action {
             lsp_types::CodeActionOrCommand::CodeAction(ca) => {
-                json!({
-                    "title": ca.title,
-                    "kind": ca.kind.map(|k| k.as_str().to_string()),
-                    "is_preferred": ca.is_preferred,
-                })
+                let kind = ca
+                    .kind
+                    .map(|k| format!(" [{}]", k.as_str()))
+                    .unwrap_or_default();
+                let pref = if ca.is_preferred.unwrap_or(false) {
+                    " (preferred)"
+                } else {
+                    ""
+                };
+                format!("CodeAction: {}{}{}", ca.title, kind, pref)
             }
             lsp_types::CodeActionOrCommand::Command(cmd) => {
-                json!({
-                    "title": cmd.title,
-                    "command": cmd.command,
-                })
+                format!("Command: {}", cmd.title)
             }
         })
         .collect();

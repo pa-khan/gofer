@@ -411,8 +411,8 @@ args = json.loads('{}')
 result = {}(*args)
 print(json.dumps(result))
 "#,
-        path.parent().unwrap().display(),
-        path.file_stem().unwrap().to_string_lossy(),
+        path.parent().unwrap_or(Path::new("")).display(),
+        path.file_stem().unwrap_or_default().to_string_lossy(),
         function_name,
         args_json.replace('\'', "\\'"),
         function_name

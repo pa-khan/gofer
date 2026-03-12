@@ -151,10 +151,107 @@ impl LanguageService for RustService {
                     }
                 }),
             },
+            // --- Group 4: Rust Analyzer (LSP) ---
+            ToolDefinition {
+                name: "rust_goto_definition".into(),
+                description: "Go to definition for Rust symbol at position.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string" },
+                        "line": { "type": "integer" },
+                        "character": { "type": "integer" }
+                    },
+                    "required": ["file_path", "line", "character"]
+                }),
+            },
+            ToolDefinition {
+                name: "rust_find_references".into(),
+                description: "Find all references to Rust symbol at position.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string" },
+                        "line": { "type": "integer" },
+                        "character": { "type": "integer" },
+                        "include_declaration": { "type": "boolean", "default": true }
+                    },
+                    "required": ["file_path", "line", "character"]
+                }),
+            },
+            ToolDefinition {
+                name: "rust_hover".into(),
+                description: "Get hover information (type, docs) for Rust symbol at position.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string" },
+                        "line": { "type": "integer" },
+                        "character": { "type": "integer" }
+                    },
+                    "required": ["file_path", "line", "character"]
+                }),
+            },
+            ToolDefinition {
+                name: "rust_diagnostics".into(),
+                description: "Get compiler diagnostics (errors, warnings) for a Rust file.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string" }
+                    },
+                    "required": ["file_path"]
+                }),
+            },
+            ToolDefinition {
+                name: "rust_completions".into(),
+                description: "Get code completions for Rust at position.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string" },
+                        "line": { "type": "integer" },
+                        "character": { "type": "integer" }
+                    },
+                    "required": ["file_path", "line", "character"]
+                }),
+            },
+            ToolDefinition {
+                name: "rust_inlay_hints".into(),
+                description: "Get inlay hints (type annotations, parameter names) for a Rust file range.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string" },
+                        "start_line": { "type": "integer" },
+                        "end_line": { "type": "integer" }
+                    },
+                    "required": ["file_path", "start_line", "end_line"]
+                }),
+            },
+            ToolDefinition {
+                name: "rust_code_actions".into(),
+                description: "Get code actions (quick fixes, refactorings) for a Rust file range.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string" },
+                        "start_line": { "type": "integer" },
+                        "end_line": { "type": "integer" }
+                    },
+                    "required": ["file_path", "start_line", "end_line"]
+                }),
+            },
         ]
     }
 
-    async fn call_tool(&self, name: &str, args: Value, root: &Path) -> Result<String> {
+    async fn call_tool(
+        &self,
+        name: &str,
+        args: Value,
+        ctx: &crate::daemon::tools::ToolContext,
+    ) -> anyhow::Result<String> {
+        let root = ctx.root_path.as_path();
         match name {
             "rust_project_info" => self.tool_project_info(root).await,
             "rust_expand_macro" => self.tool_expand_macro(args, root).await,
@@ -164,6 +261,46 @@ impl LanguageService for RustService {
             "rust_check_code" => self.tool_check_code(args, root).await,
             "rust_clippy" => self.tool_clippy(args, root).await,
             "rust_test_run" => self.tool_test_run(args, root).await,
+
+            // Rust Analyzer (LSP) Tools
+            "rust_goto_definition" => {
+                let res =
+                    crate::daemon::handlers::rust_analyzer::tool_rust_goto_definition(args, ctx)
+                        .await?;
+                Ok(serde_json::to_string_pretty(&res)?)
+            }
+            "rust_find_references" => {
+                let res =
+                    crate::daemon::handlers::rust_analyzer::tool_rust_find_references(args, ctx)
+                        .await?;
+                Ok(serde_json::to_string_pretty(&res)?)
+            }
+            "rust_hover" => {
+                let res =
+                    crate::daemon::handlers::rust_analyzer::tool_rust_hover(args, ctx).await?;
+                Ok(serde_json::to_string_pretty(&res)?)
+            }
+            "rust_diagnostics" => {
+                let res = crate::daemon::handlers::rust_analyzer::tool_rust_diagnostics(args, ctx)
+                    .await?;
+                Ok(serde_json::to_string_pretty(&res)?)
+            }
+            "rust_completions" => {
+                let res = crate::daemon::handlers::rust_analyzer::tool_rust_completions(args, ctx)
+                    .await?;
+                Ok(serde_json::to_string_pretty(&res)?)
+            }
+            "rust_inlay_hints" => {
+                let res = crate::daemon::handlers::rust_analyzer::tool_rust_inlay_hints(args, ctx)
+                    .await?;
+                Ok(serde_json::to_string_pretty(&res)?)
+            }
+            "rust_code_actions" => {
+                let res = crate::daemon::handlers::rust_analyzer::tool_rust_code_actions(args, ctx)
+                    .await?;
+                Ok(serde_json::to_string_pretty(&res)?)
+            }
+
             _ => Err(anyhow::anyhow!("Unknown Rust tool: {}", name)),
         }
     }

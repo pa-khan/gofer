@@ -20,20 +20,38 @@ pub async fn tool_get_errors(args: Value, ctx: &ToolContext) -> Result<Value> {
         .await?;
     let count = errors.len() as u32;
 
+    let mut map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for err in errors {
+        let path = make_relative(&ctx.root_path, &err.file_path);
+        let entry = if let Some(ref sugg) = err.suggestion {
+            format!(
+                "{}:{} [{}] {}: {} (Suggestion: {})",
+                err.line,
+                err.column.unwrap_or(0),
+                err.severity,
+                err.code.as_deref().unwrap_or(""),
+                err.message,
+                sugg
+            )
+        } else {
+            format!(
+                "{}:{} [{}] {}: {}",
+                err.line,
+                err.column.unwrap_or(0),
+                err.severity,
+                err.code.as_deref().unwrap_or(""),
+                err.message
+            )
+        };
+        map.entry(path).or_default().push(entry);
+    }
+
     Ok(json!({
         "total": count,
         "offset": offset,
         "limit": limit,
         "has_more": count == limit,
-        "errors": errors.iter().map(|err| json!({
-            "severity": err.severity,
-            "file_path": make_relative(&ctx.root_path, &err.file_path),
-            "line": err.line,
-            "column": err.column,
-            "code": err.code,
-            "message": err.message,
-            "suggestion": err.suggestion
-        })).collect::<Vec<_>>()
+        "errors": map
     }))
 }
 
@@ -147,12 +165,10 @@ pub async fn tool_get_config_keys(ctx: &ToolContext) -> Result<Value> {
 
     Ok(json!({
         "total": keys.len(),
-        "keys": keys.iter().map(|key| json!({
-            "name": key.key_name,
-            "required": key.required == 1,
-            "data_type": key.data_type,
-            "source": key.source
-        })).collect::<Vec<_>>()
+        "keys": keys.iter().map(|key| {
+            let req_str = if key.required == 1 { " [required]" } else { "" };
+            format!("{} ({}) src:{}{}", key.key_name, key.data_type.as_deref().unwrap_or(""), key.source, req_str)
+        }).collect::<Vec<_>>()
     }))
 }
 

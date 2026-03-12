@@ -9,6 +9,7 @@ mod error_recovery; // Feature 016: graceful error handling & recovery
 mod indexer;
 mod ipc;
 mod languages;
+mod logger;
 mod models;
 mod resource_limits; // Feature 015: connection pooling & resource management
 mod scoring_index;
@@ -19,13 +20,8 @@ use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use serde_json::json;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use ipc::client::DaemonClient;
-
-// Удалена инициализация rayon global thread pool
-// Это создавало deadlock с tokio::spawn_blocking в embedder
-// Rayon будет использовать свой дефолтный thread pool при первом использовании
 
 #[derive(Parser)]
 #[command(name = "gofer")]
@@ -42,7 +38,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start daemon (if needed), register and activate current project
+    /// Start daemon (if needed) and register current project
     Hi,
 
     /// Register current project with the daemon
@@ -136,10 +132,14 @@ fn socket_path() -> PathBuf {
 }
 
 fn main() -> anyhow::Result<()> {
-    // Initialize rayon thread pool early (before any CPU-bound work)
-    // Удалена инициализация rayon - используем дефолтный thread pool
-
     let cli = Cli::parse();
+
+    // Initialize logger for CLI and MCP processes (Daemon initializes after fork)
+    let _logger_guard = match &cli.command {
+        Commands::Daemon => None,
+        Commands::Mcp { .. } => Some(crate::logger::init("mcp")),
+        _ => Some(crate::logger::init("cli")),
+    };
 
     match cli.command {
         Commands::Daemon => run_daemon(),
@@ -168,10 +168,19 @@ fn run_daemon() -> anyhow::Result<()> {
     let err_file = home.join("daemon.err");
     let pid_file = home.join("daemon.pid");
 
+    let stdout_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file)?;
+    let stderr_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&err_file)?;
+
     let daemonize = daemonize::Daemonize::new()
         .pid_file(&pid_file)
-        .stdout(std::fs::File::create(&log_file)?)
-        .stderr(std::fs::File::create(&err_file)?);
+        .stdout(stdout_file)
+        .stderr(stderr_file);
 
     match daemonize.start() {
         Ok(_) => {
@@ -195,24 +204,7 @@ fn run_daemon() -> anyhow::Result<()> {
             );
 
             rt.block_on(async {
-                // Structured JSON logging по умолчанию для daemon, text через gofer_LOG_TEXT=1
-                let text_logging = std::env::var("gofer_LOG_TEXT")
-                    .map(|v| v == "1" || v == "true")
-                    .unwrap_or(false);
-                let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| "gofer=info".into());
-
-                if text_logging {
-                    tracing_subscriber::registry()
-                        .with(env_filter)
-                        .with(tracing_subscriber::fmt::layer())
-                        .init();
-                } else {
-                    tracing_subscriber::registry()
-                        .with(env_filter)
-                        .with(tracing_subscriber::fmt::layer().json())
-                        .init();
-                }
+                let _logger_guard = crate::logger::init("daemon");
 
                 tracing::info!("gofer daemon starting (pid {})", std::process::id());
                 let state = Arc::new(daemon::state::DaemonState::new(home).await?);
@@ -314,13 +306,16 @@ async fn activate_with_progress(
     let sock_owned = sock.to_path_buf();
     let path_owned = project_path.to_string();
 
+    let sock_spawn = sock_owned.clone();
+    let path_spawn = path_owned.clone();
+
     // Spawn activation in background task
     let activate_handle = tokio::spawn(async move {
-        let mut client = DaemonClient::connect(&sock_owned).await?;
+        let mut client = DaemonClient::connect(&sock_spawn).await?;
         client
             .call(
                 "daemon/activate_project",
-                json!({ "project_path": path_owned, "watch": watch }),
+                json!({ "project_path": path_spawn, "watch": watch }),
             )
             .await
     });
@@ -333,8 +328,31 @@ async fn activate_with_progress(
     const ABSOLUTE_TIMEOUT_TICKS: u32 = 240; // 60 seconds total
     let mut total_ticks = 0u32;
 
+    // Setup signal handler for graceful interruption
+    let mut sigint = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+    {
+        Ok(s) => Some(s),
+        Err(_) => None,
+    };
+
     loop {
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        tokio::select! {
+            _ = async {
+                if let Some(ref mut s) = sigint {
+                    s.recv().await
+                } else {
+                    std::future::pending().await
+                }
+            } => {
+                eprintln!("\nActivation cancelled by user. Stopping background indexing...");
+                if let Ok(mut client) = DaemonClient::connect(&sock_owned).await {
+                    let _ = client.call("daemon/deactivate_project", json!({ "project_path": path_owned.clone() })).await;
+                }
+                break;
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => {}
+        }
+
         total_ticks += 1;
 
         // Check if activation finished
@@ -479,9 +497,6 @@ fn handle_hi() -> anyhow::Result<()> {
             .await?;
         let project_id = reg.get("id").and_then(|v| v.as_str()).unwrap_or("?");
         println!("Registered: {} ({})", cwd_str, project_id);
-
-        // Activate with watcher — run with progress polling
-        activate_with_progress(&sock, &cwd_str, true).await?;
 
         anyhow::Ok(())
     })
@@ -843,12 +858,33 @@ const DEFAULT_CONFIG: &str = r#"# gofer configuration
 port = 10987
 
 [indexer]
-ignore = []
+# Directories and patterns to exclude from indexing
+ignore = [
+    "**/node_modules/**",
+    "**/target/**",
+    "**/.git/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/.next/**",
+    "**/.nuxt/**",
+    "**/.cache/**",
+    "**/coverage/**",
+    "**/__pycache__/**",
+    "**/.pytest_cache/**",
+    "**/vendor/**",
+    "**/.venv/**",
+    "**/venv/**",
+    "**/out/**",
+    "**/.idea/**",
+    "**/.vscode/**",
+    "**/tmp/**",
+    "**/temp/**",
+]
 parallel_workers = 4
 
 [embedding]
 batch_size = 32
-model = "BGESmallENV15"
+model = "NomicEmbedTextV15"
 pool_size = 4
 
 [reranker]

@@ -13,6 +13,7 @@ use smol_str::SmolStr;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
+use tokio_util::sync::CancellationToken;
 
 use super::domains::{detect_domain, DomainConfig};
 use super::embedder::EmbedderPool;
@@ -101,6 +102,7 @@ pub async fn run_pipeline(
     lance: Arc<Mutex<LanceStorage>>,
     embedder: Arc<EmbedderPool>,
     progress: Option<Arc<SyncProgress>>,
+    cancel: CancellationToken,
 ) -> Result<Vec<ParsedFileMetadata>> {
     let num_workers = std::thread::available_parallelism()
         .map(|n| (n.get() / 2).clamp(4, 8))
@@ -136,6 +138,7 @@ pub async fn run_pipeline(
     let root_owned = root.to_path_buf();
     let ignores_owned = extra_ignores.to_vec();
     let prog_scanner = progress.clone();
+    let cancel_scanner = cancel.clone();
     let h_scanner = tokio::spawn(async move {
         scanner_stage(
             root_owned,
@@ -143,34 +146,40 @@ pub async fn run_pipeline(
             existing_hashes,
             scan_tx,
             prog_scanner,
+            cancel_scanner,
         )
         .await
     });
 
     // Parser workers — each gets a clone of the shared receiver
-    let mut h_parsers: Vec<JoinHandle<Result<()>>> = Vec::with_capacity(num_workers);
+    let mut h_parsers: Vec<JoinHandle<anyhow::Result<()>>> = Vec::with_capacity(num_workers);
     for _ in 0..num_workers {
         let rx = scan_rx.clone();
         let tx = parse_tx.clone();
         let prog = progress.clone();
-        h_parsers.push(tokio::spawn(
-            async move { parser_worker(rx, tx, prog).await },
-        ));
+        let cancel_parser = cancel.clone();
+        h_parsers.push(tokio::spawn(async move {
+            parser_worker(rx, tx, prog, cancel_parser).await
+        }));
     }
     drop(parse_tx); // Only worker clones hold senders now
 
-    let h_batcher = tokio::spawn(async move { batcher_stage(parse_rx, batch_tx).await });
+    let cancel_batcher = cancel.clone();
+    let h_batcher =
+        tokio::spawn(async move { batcher_stage(parse_rx, batch_tx, cancel_batcher).await });
 
     let prog_embedder = progress.clone();
     let sqlite_embedder = sqlite.clone();
     let embedder_clone = embedder.clone();
-    let h_embedder: JoinHandle<Result<()>> = tokio::spawn(async move {
+    let cancel_embedder = cancel.clone();
+    let h_embedder: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
         if let Err(ref e) = embedder_stage(
             embedder_clone,
             batch_rx,
             embed_tx,
             prog_embedder,
             sqlite_embedder,
+            cancel_embedder,
         )
         .await
         {
@@ -183,9 +192,17 @@ pub async fn run_pipeline(
     let collected_clone = collected.clone();
     let prog_writer = progress.clone();
     let lance_compact = lance.clone();
-    let h_writer: JoinHandle<Result<()>> = tokio::spawn(async move {
-        if let Err(ref e) =
-            writer_stage(sqlite_clone, lance, embed_rx, collected_clone, prog_writer).await
+    let cancel_writer = cancel.clone();
+    let h_writer: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+        if let Err(ref e) = writer_stage(
+            sqlite_clone,
+            lance,
+            embed_rx,
+            collected_clone,
+            prog_writer,
+            cancel_writer,
+        )
+        .await
         {
             tracing::error!("Writer stage error: {}", e);
         }
@@ -257,7 +274,8 @@ async fn scanner_stage(
     existing_hashes: HashMap<String, (String, i64)>,
     tx: mpsc::Sender<ScannedFile>,
     progress: Option<Arc<SyncProgress>>,
-) -> Result<usize> {
+    cancel: CancellationToken,
+) -> anyhow::Result<usize> {
     let files = scan_directory(&root, &extra_ignores);
     let total = files.len();
     tracing::info!("Scanner: found {} files", total);
@@ -273,6 +291,11 @@ async fn scanner_stage(
     let mut skipped_errors = 0usize;
 
     for path in files {
+        if cancel.is_cancelled() {
+            tracing::info!("Scanner: cancelled by user");
+            break;
+        }
+
         let path_str = path.to_string_lossy().to_string();
 
         // Detect language early to skip unsupported files
@@ -393,8 +416,14 @@ async fn parser_worker(
     rx: Arc<Mutex<mpsc::Receiver<ScannedFile>>>,
     tx: mpsc::Sender<ParsedDoc>,
     progress: Option<Arc<SyncProgress>>,
-) -> Result<()> {
+    cancel: CancellationToken,
+) -> anyhow::Result<()> {
     loop {
+        if cancel.is_cancelled() {
+            tracing::info!("Parser: cancelled by user");
+            break;
+        }
+
         // Lock receiver, grab one message, release lock immediately
         let scanned = {
             let mut rx_guard = rx.lock().await;
@@ -406,7 +435,7 @@ async fn parser_worker(
         };
 
         // Offload CPU-heavy parsing to blocking thread pool
-        let parsed = match tokio::task::spawn_blocking(move || -> Result<ParsedDoc> {
+        let parsed = match tokio::task::spawn_blocking(move || -> anyhow::Result<ParsedDoc> {
             let mut parser = CodeParser::new();
             let content_ref = &*scanned.content;
 
@@ -495,7 +524,8 @@ fn total_content_bytes(chunks: &[CodeChunk]) -> usize {
 async fn batcher_stage(
     mut rx: mpsc::Receiver<ParsedDoc>,
     tx: mpsc::Sender<ChunkBatch>,
-) -> Result<()> {
+    cancel: CancellationToken,
+) -> anyhow::Result<()> {
     let mut current_chunks: Vec<CodeChunk> = Vec::new();
     let mut current_metadata: Vec<ParsedFileMetadata> = Vec::new();
     let timeout = Duration::from_millis(BATCH_TIMEOUT_MS);
@@ -509,6 +539,10 @@ async fn batcher_stage(
 
     loop {
         tokio::select! {
+            _ = cancel.cancelled() => {
+                tracing::info!("Batcher: cancelled by user");
+                break;
+            }
             msg = rx.recv() => {
                 match msg {
                     Some(doc) => {
@@ -643,14 +677,26 @@ async fn embedder_stage(
     tx: mpsc::Sender<EmbeddedBatch>,
     progress: Option<Arc<SyncProgress>>,
     sqlite: SqliteStorage,
-) -> Result<()> {
+    cancel: CancellationToken,
+) -> anyhow::Result<()> {
     let mut total_embedded = 0usize;
     let mut cache_hits = 0usize;
     let mut batches_received = 0usize;
 
     tracing::info!("Embedder: started, waiting for batches");
 
-    while let Some(batch) = rx.recv().await {
+    loop {
+        let batch = tokio::select! {
+            _ = cancel.cancelled() => {
+                tracing::info!("Embedder: cancelled by user");
+                break;
+            }
+            res = rx.recv() => match res {
+                Some(b) => b,
+                None => break,
+            }
+        };
+
         batches_received += 1;
         tracing::info!(
             "Embedder: received batch {} with {} chunks, {} metadata",
@@ -821,14 +867,26 @@ async fn writer_stage(
     mut rx: mpsc::Receiver<EmbeddedBatch>,
     collected: Arc<Mutex<Vec<ParsedFileMetadata>>>,
     progress: Option<Arc<SyncProgress>>,
-) -> Result<()> {
+    cancel: tokio_util::sync::CancellationToken,
+) -> anyhow::Result<()> {
     let mut pending_metadata: Vec<ParsedFileMetadata> = Vec::new();
     let mut total_files = 0usize;
     let mut total_chunks = 0usize;
 
     tracing::info!("Writer: started, waiting for embedded batches");
 
-    while let Some(batch) = rx.recv().await {
+    loop {
+        let batch = tokio::select! {
+            _ = cancel.cancelled() => {
+                tracing::info!("Writer: cancelled by user");
+                break;
+            }
+            res = rx.recv() => match res {
+                Some(b) => b,
+                None => break,
+            }
+        };
+
         tracing::debug!(
             "Writer: received batch with {} chunks, {} metadata",
             batch.chunks.len(),
@@ -853,6 +911,15 @@ async fn writer_stage(
             total_chunks += batch.chunks.len();
         }
 
+        // 0. Update progress eagerly!
+        let metadata_count = batch.metadata.len();
+        if metadata_count > 0 {
+            total_files += metadata_count;
+            if let Some(ref p) = progress {
+                p.files_written.store(total_files, Ordering::Relaxed);
+            }
+        }
+
         // Accumulate metadata for batched SQLite write
         pending_metadata.extend(batch.metadata);
 
@@ -861,10 +928,6 @@ async fn writer_stage(
             let count = pending_metadata.len();
             tracing::info!("Writer: flushing {} metadata entries to SQLite", count);
             flush_sqlite_batch(&sqlite, &mut pending_metadata, &collected).await;
-            total_files += count;
-            if let Some(ref p) = progress {
-                p.files_written.store(total_files, Ordering::Relaxed);
-            }
             tracing::info!("Writer: {} files written so far", total_files);
         }
     }
@@ -876,7 +939,6 @@ async fn writer_stage(
         let count = pending_metadata.len();
         tracing::info!("Writer: final flush of {} metadata entries", count);
         flush_sqlite_batch(&sqlite, &mut pending_metadata, &collected).await;
-        total_files += count;
     }
 
     // Resolve cross-file references
@@ -947,11 +1009,25 @@ async fn flush_sqlite_batch(
             }
         };
 
-        // 2. Update domain
+        // 2. Update domain, language, and indexing status
         let tech_json = serde_json::to_string(&file_meta.tech_stack).unwrap_or_default();
-        let _ = sqlx::query("UPDATE files SET domain = ?, tech_stack = ? WHERE id = ?")
+        let language_str = match file_meta.language {
+            SupportedLanguage::Rust => "rust",
+            SupportedLanguage::TypeScript => "typescript",
+            SupportedLanguage::JavaScript => "javascript",
+            SupportedLanguage::Python => "python",
+            SupportedLanguage::Go => "go",
+            SupportedLanguage::Vue => "vue",
+        };
+        let now = chrono::Utc::now().timestamp();
+
+        let _ = sqlx::query(
+            "UPDATE files SET domain = ?, tech_stack = ?, language = ?, indexing_status = 'completed', last_indexed_at = ? WHERE id = ?"
+        )
             .bind(file_meta.domain.as_str())
             .bind(&tech_json)
+            .bind(language_str)
+            .bind(now)
             .bind(file_id)
             .execute(&mut *tx)
             .await;

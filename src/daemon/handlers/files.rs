@@ -459,14 +459,48 @@ pub async fn tool_find_files(args: Value, ctx: &ToolContext) -> Result<Value> {
         ctx.root_path.as_ref().clone()
     };
 
-    let mut files = Vec::new();
-    let walker = glob::glob(&search_root.join(pat).to_string_lossy());
+    // Check if search_root exists
+    if !search_root.exists() {
+        return Ok(json!({
+            "pattern": pat,
+            "count": 0,
+            "files": []
+        }));
+    }
 
-    if let Ok(paths) = walker {
-        for path in paths.flatten() {
-            if path.is_file() {
-                files.push(make_relative(&ctx.root_path, path.to_str().unwrap_or("")));
-            }
+    let mut files = Vec::new();
+
+    // Parse glob pattern
+    let glob_pattern = glob::Pattern::new(pat)
+        .map_err(|e| GoferError::InvalidParams(format!("Invalid glob pattern: {}", e)))?;
+
+    // Use WalkDir for traversal
+    let walker = WalkDir::new(&search_root).into_iter();
+
+    for entry in walker.filter_map(|e| e.ok()) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        // Skip .git directories
+        if entry.path().to_string_lossy().contains("/.git/") {
+            continue;
+        }
+
+        // Get relative path from search_root for pattern matching
+        let relative_to_search = entry
+            .path()
+            .strip_prefix(&search_root)
+            .ok()
+            .and_then(|p| p.to_str())
+            .unwrap_or("");
+
+        // Match against glob pattern
+        if glob_pattern.matches(relative_to_search) {
+            files.push(make_relative(
+                &ctx.root_path,
+                entry.path().to_str().unwrap_or(""),
+            ));
         }
     }
 
@@ -507,7 +541,8 @@ pub async fn tool_grep(args: Value, ctx: &ToolContext) -> Result<Value> {
         ctx.root_path.as_ref().clone()
     };
 
-    let mut matches = Vec::new();
+    let mut file_matches: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
     let mut count = 0;
 
     let walker = WalkDir::new(&search_root).into_iter();
@@ -530,18 +565,19 @@ pub async fn tool_grep(args: Value, ctx: &ToolContext) -> Result<Value> {
         }
 
         if let Ok(content) = std::fs::read_to_string(entry.path()) {
+            let mut file_hits = Vec::new();
             for (i, line) in content.lines().enumerate() {
                 if re.is_match(line) {
-                    matches.push(json!({
-                        "file_path": make_relative(&ctx.root_path, entry.path().to_str().unwrap_or("")),
-                        "line": i + 1,
-                        "content": line.trim()
-                    }));
+                    file_hits.push(format!("{}: {}", i + 1, line.trim()));
                     count += 1;
                     if count >= max_results {
                         break;
                     }
                 }
+            }
+            if !file_hits.is_empty() {
+                let rel_path = make_relative(&ctx.root_path, entry.path().to_str().unwrap_or(""));
+                file_matches.insert(rel_path, file_hits);
             }
         }
         if count >= max_results {
@@ -552,7 +588,7 @@ pub async fn tool_grep(args: Value, ctx: &ToolContext) -> Result<Value> {
     Ok(json!({
         "pattern": pat,
         "count": count,
-        "matches": matches
+        "matches": file_matches
     }))
 }
 
@@ -621,7 +657,7 @@ async fn resolve_types(
     type_names: HashSet<String>,
     sqlite: &SqliteStorage,
     file_path: &str,
-) -> Result<Vec<Value>> {
+) -> Result<Vec<String>> {
     if type_names.is_empty() {
         return Ok(Vec::new());
     }
@@ -646,14 +682,17 @@ async fn resolve_types(
                             let type_code = lines[start_idx..end_idx].join("\n");
                             let line_count = end_idx - start_idx;
 
-                            type_defs.push(json!({
-                                "section": "type",
-                                "name": type_name,
-                                "kind": symbol.kind,
-                                "code": type_code,
-                                "file": file_info.path,
-                                "lines": line_count
-                            }));
+                            type_defs.push(format!(
+                                "{} ({:?} in {}, {} lines):\n{}",
+                                type_name,
+                                symbol.kind,
+                                std::path::Path::new(&file_info.path)
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or(""),
+                                line_count,
+                                type_code
+                            ));
                         }
                     }
                 }
@@ -700,7 +739,7 @@ async fn resolve_callees(
     callee_names: HashSet<String>,
     content: &str,
     lang: &SupportedLanguage,
-) -> Result<Vec<Value>> {
+) -> Result<Vec<String>> {
     if callee_names.is_empty() {
         return Ok(Vec::new());
     }
@@ -709,14 +748,10 @@ async fn resolve_callees(
     for callee_name in callee_names {
         if let Some(func_info) = find_function_in_file(&callee_name, content, lang)? {
             let line_count = func_info.code.lines().count();
-            callees.push(json!({
-                "section": "callee",
-                "name": callee_name,
-                "code": func_info.code,
-                "start_line": func_info.start_line,
-                "end_line": func_info.end_line,
-                "lines": line_count
-            }));
+            callees.push(format!(
+                "{} (lines {}-{}, {} lines):\n{}",
+                callee_name, func_info.start_line, func_info.end_line, line_count, func_info.code
+            ));
         }
     }
     Ok(callees)

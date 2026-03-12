@@ -41,10 +41,10 @@ pub async fn tool_get_index_status(ctx: &ToolContext) -> Result<Value> {
         meta_map.insert(row.key, row.value);
     }
 
-    // Get pending/failed files
+    // Get pending/failed/completed files
     #[derive(sqlx::FromRow)]
     struct StatusCount {
-        indexing_status: String,
+        indexing_status: Option<String>,
         count: i64,
     }
 
@@ -52,7 +52,6 @@ pub async fn tool_get_index_status(ctx: &ToolContext) -> Result<Value> {
         r#"
         SELECT indexing_status, COUNT(*) as count
         FROM files
-        WHERE indexing_status IS NOT NULL
         GROUP BY indexing_status
         "#,
     )
@@ -65,10 +64,11 @@ pub async fn tool_get_index_status(ctx: &ToolContext) -> Result<Value> {
 
     for row in status_counts {
         let count = row.count;
-        match row.indexing_status.as_str() {
-            "pending" => pending = count,
-            "failed" => failed = count,
-            "completed" => completed = count,
+        match row.indexing_status.as_deref() {
+            Some("pending") => pending = count,
+            Some("failed") => failed = count,
+            Some("completed") => completed += count,
+            None => completed += count, // NULL means successfully indexed (old behavior)
             _ => {}
         }
     }
@@ -134,38 +134,28 @@ pub async fn tool_get_index_status(ctx: &ToolContext) -> Result<Value> {
     let mut recommendations = Vec::new();
 
     if failed > 0 {
-        warnings.push(json!({
-            "severity": "error",
-            "message": format!("{} files failed to index", failed),
-            "affected_count": failed
-        }));
+        warnings.push(format!("[error] {} files failed to index", failed));
         recommendations.push("Run force_reindex on failed files to retry indexing".to_string());
     }
 
     if pending > 0 {
-        warnings.push(json!({
-            "severity": "info",
-            "message": format!("{} files pending indexing", pending),
-            "affected_count": pending
-        }));
+        warnings.push(format!("[info] {} files pending indexing", pending));
         recommendations.push("Wait for indexing to complete or check daemon logs".to_string());
     }
 
     if age_minutes > 1440 {
-        warnings.push(json!({
-            "severity": "warning",
-            "message": format!("Index not synced in {} hours", age_minutes / 60),
-            "age_hours": age_minutes / 60
-        }));
+        warnings.push(format!(
+            "[warning] Index not synced in {} hours",
+            age_minutes / 60
+        ));
         recommendations.push("Run force_reindex with scope=project to refresh index".to_string());
     }
 
     if completeness < 80.0 {
-        warnings.push(json!({
-            "severity": "warning",
-            "message": format!("Index only {:.1}% complete", completeness),
-            "completeness": completeness
-        }));
+        warnings.push(format!(
+            "[warning] Index only {:.1}% complete",
+            completeness
+        ));
         recommendations.push("Check for indexing errors and run validate_index".to_string());
     }
 
@@ -177,11 +167,10 @@ pub async fn tool_get_index_status(ctx: &ToolContext) -> Result<Value> {
     };
 
     if file_count > 10 && embedding_ratio < 1.0 {
-        warnings.push(json!({
-            "severity": "warning",
-            "message": format!("Low embedding ratio: {:.2} chunks per file", embedding_ratio),
-            "ratio": embedding_ratio
-        }));
+        warnings.push(format!(
+            "[warning] Low embedding ratio: {:.2} chunks per file",
+            embedding_ratio
+        ));
         recommendations
             .push("Some files may lack embeddings. Run validate_index for details".to_string());
     }
@@ -245,12 +234,11 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
     struct FileWithoutSymbols {
         path: String,
         language: Option<String>,
-        last_indexed_at: Option<String>,
     }
 
     let files_without_symbols: Vec<FileWithoutSymbols> = sqlx::query_as(
         r#"
-        SELECT f.path, f.language, f.last_indexed_at
+        SELECT f.path, f.language
         FROM files f
         LEFT JOIN symbols s ON s.file_id = f.id
         WHERE s.id IS NULL
@@ -262,15 +250,15 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
     .await?;
 
     if !files_without_symbols.is_empty() {
-        let sample_files: Vec<Value> = files_without_symbols
+        let sample_files: Vec<String> = files_without_symbols
             .iter()
             .take(10)
             .map(|r| {
-                json!({
-                    "path": r.path,
-                    "language": r.language,
-                    "last_indexed": r.last_indexed_at
-                })
+                format!(
+                    "{} ({})",
+                    r.path,
+                    r.language.as_deref().unwrap_or("unknown")
+                )
             })
             .collect();
 
@@ -285,10 +273,7 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
                 "root_cause": "Files may be empty, parsing failed, or file is not valid code",
                 "examples": sample_files
             },
-            "affected_items": files_without_symbols.iter().map(|r| json!({
-                "item_type": "file",
-                "item_path": r.path
-            })).collect::<Vec<_>>(),
+            "affected_items": files_without_symbols.iter().map(|r| format!("file: {}", r.path)).collect::<Vec<_>>(),
             "recommendation": {
                 "action": "reindex_files",
                 "paths": files_without_symbols.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(),
@@ -330,16 +315,9 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
                 "description": format!("{} symbols reference non-existent files", orphaned_symbols.len()),
                 "impact": "Database inconsistency, corrupted references",
                 "root_cause": "Files were deleted but symbols not cleaned up",
-                "examples": orphaned_symbols.iter().take(5).map(|r| json!({
-                    "symbol": r.name,
-                    "kind": r.kind,
-                    "orphaned_file_id": r.file_id
-                })).collect::<Vec<_>>()
+                "examples": orphaned_symbols.iter().take(5).map(|r| format!("{}: '{}' (file_id: {})", r.kind, r.name, r.file_id)).collect::<Vec<_>>()
             },
-            "affected_items": orphaned_symbols.iter().map(|r| json!({
-                "item_type": "symbol",
-                "item_id": r.id.to_string()
-            })).collect::<Vec<_>>(),
+            "affected_items": orphaned_symbols.iter().map(|r| format!("symbol: id {} '{}'", r.id, r.name)).collect::<Vec<_>>(),
             "recommendation": {
                 "action": "delete_orphaned_data",
                 "ids": orphaned_symbols.iter().map(|r| r.id).collect::<Vec<_>>(),
@@ -354,13 +332,11 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
     #[derive(sqlx::FromRow)]
     struct FailedFile {
         path: String,
-        last_indexed_at: Option<String>,
-        language: Option<String>,
     }
 
     let failed_files: Vec<FailedFile> = sqlx::query_as(
         r#"
-        SELECT path, last_indexed_at, language
+        SELECT path
         FROM files
         WHERE indexing_status = 'failed'
         LIMIT 20
@@ -379,16 +355,9 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
                 "description": format!("{} files have failed indexing status", failed_files.len()),
                 "impact": "These files are not searchable and their symbols are missing",
                 "root_cause": "Parsing errors, file access issues, or bugs in indexer",
-                "examples": failed_files.iter().take(5).map(|r| json!({
-                    "path": r.path,
-                    "language": r.language,
-                    "last_attempt": r.last_indexed_at
-                })).collect::<Vec<_>>()
+                "examples": failed_files.iter().take(5).map(|r| r.path.to_string()).collect::<Vec<_>>()
             },
-            "affected_items": failed_files.iter().map(|r| json!({
-                "item_type": "file",
-                "item_path": r.path
-            })).collect::<Vec<_>>(),
+            "affected_items": failed_files.iter().map(|r| format!("file: {}", r.path)).collect::<Vec<_>>(),
             "recommendation": {
                 "action": "reindex_files",
                 "paths": failed_files.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(),
@@ -431,10 +400,7 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
                 "impact": "get_references and get_callers may return invalid results",
                 "root_cause": "Files were deleted but references not cleaned up"
             },
-            "affected_items": broken_refs.iter().map(|r| json!({
-                "item_type": "reference",
-                "item_id": r.id.to_string()
-            })).collect::<Vec<_>>(),
+            "affected_items": broken_refs.iter().map(|r| format!("reference: id {}", r.id)).collect::<Vec<_>>(),
             "recommendation": {
                 "action": "delete_orphaned_data",
                 "command": "DELETE FROM references WHERE file_id NOT IN (SELECT id FROM files)",
@@ -458,10 +424,7 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
                     "impact": "Database may be corrupted, risk of data loss",
                     "root_cause": "Disk errors, interrupted writes, or software bugs"
                 },
-                "affected_items": [json!({
-                    "item_type": "database",
-                    "item_path": "gofer.db"
-                })],
+                "affected_items": ["database: gofer.db"],
                 "recommendation": {
                     "action": "rebuild_index",
                     "command": "Backup current DB, delete, and run full reindex",
@@ -493,10 +456,7 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
                 "files_count": file_count,
                 "chunks_count": 0
             },
-            "affected_items": [json!({
-                "item_type": "embeddings",
-                "item_path": "all files"
-            })],
+            "affected_items": ["embeddings: all files"],
             "recommendation": {
                 "action": "rebuild_index",
                 "command": "force_reindex with scope=project",

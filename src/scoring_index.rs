@@ -58,7 +58,7 @@ impl ScoringIndex {
             files: HashMap::new(),
             built_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or(std::time::Duration::from_secs(0))
                 .as_secs(),
             version: 1,
         }
@@ -125,7 +125,10 @@ impl ScoringIndex {
                                     .iter()
                                     .map(|s| {
                                         use rkyv::Deserialize;
-                                        s.deserialize(&mut rkyv::Infallible).unwrap()
+                                        match s.deserialize(&mut rkyv::Infallible) {
+                                            Ok(k) => k,
+                                            Err(_) => unreachable!("Infallible deserialization"),
+                                        }
                                     })
                                     .collect(),
                                 summary: v.summary.as_ref().map(|s| s.to_string()),
@@ -161,7 +164,7 @@ impl ScoringIndex {
     pub fn needs_rebuild(&self, max_age_seconds: u64) -> bool {
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or(std::time::Duration::from_secs(0))
             .as_secs();
 
         let age = current_time.saturating_sub(self.built_at);

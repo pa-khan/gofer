@@ -53,13 +53,9 @@ pub async fn tool_git_history(args: Value, ctx: &ToolContext) -> Result<Value> {
     Ok(json!({
         "file": file,
         "total": history.len(),
-        "commits": history.iter().map(|c| json!({
-            "id": &c.id[..8.min(c.id.len())],
-            "author": c.author,
-            "email": c.email,
-            "date": c.timestamp,
-            "message": c.message
-        })).collect::<Vec<_>>()
+        "commits": history.iter().map(|c| {
+            format!("{} {} <{}> ({}): {}", &c.id[..8.min(c.id.len())], c.author, c.email, c.timestamp, c.message.lines().next().unwrap_or(""))
+        }).collect::<Vec<_>>()
     }))
 }
 
@@ -128,13 +124,14 @@ pub async fn tool_verify_patch(args: Value, ctx: &ToolContext) -> Result<Value> 
         "file": file,
         "status": result.status,
         "summary": result.summary,
-        "diagnostics": result.diagnostics.iter().map(|d| json!({
-            "severity": d.severity,
-            "line": d.line,
-            "column": d.column,
-            "code": d.code,
-            "message": d.message,
-            "suggestion": d.suggestion
-        })).collect::<Vec<_>>()
+        "diagnostics": result.diagnostics.iter().map(|d| {
+            let col = d.column.map(|c| format!(":{}", c)).unwrap_or_default();
+            let code = d.code.as_deref().map(|c| format!("{}: ", c)).unwrap_or_default();
+            let mut s = format!("{}{u} [{}] {}{}", d.line, d.severity, code, d.message, u = col);
+            if let Some(ref sugg) = d.suggestion {
+                s.push_str(&format!(" (suggestion: {})", sugg));
+            }
+            s
+        }).collect::<Vec<_>>()
     }))
 }

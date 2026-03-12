@@ -11,6 +11,11 @@ use serde_json::{json, Value};
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
+// Debug logging for MCP communication
+fn log_bridge(msg: &str) {
+    tracing::debug!("{}", msg);
+}
+
 /// Sentinel IDs for internal bridge requests — filtered from client output.
 const ROOTS_LIST_ID: &str = "__gofer_roots__";
 const REGISTER_ID: &str = "__gofer_register__";
@@ -50,11 +55,15 @@ pub async fn run_bridge(fallback_path: PathBuf, socket_path: &Path) -> Result<()
                             Ok(mut msg) => {
                                 let method = msg.get("method")
                                     .and_then(|v| v.as_str())
-                                    .unwrap_or("");
+                                    .unwrap_or("")
+                                    .to_string();
                                 let msg_id = msg.get("id").cloned();
+
+                                log_bridge(&format!("recv from client: method={}, id={:?}", method, msg_id));
 
                                 // ── Response to our roots/list request ──
                                 if is_bridge_id(&msg_id, ROOTS_LIST_ID) {
+                                    log_bridge("got roots/list response from client");
                                     if let Some(root) = extract_root_path(&msg) {
                                         project_path = root;
                                         // Auto-register & activate project in daemon
@@ -70,7 +79,8 @@ pub async fn run_bridge(fallback_path: PathBuf, socket_path: &Path) -> Result<()
                                             "method": "daemon/activate_project",
                                             "params": {
                                                 "project_path": &project_path,
-                                                "watch": true
+                                                "watch": true,
+                                                "background": true
                                             }
                                         })).await;
                                     }
@@ -78,7 +88,7 @@ pub async fn run_bridge(fallback_path: PathBuf, socket_path: &Path) -> Result<()
                                 }
 
                                 // ── After "initialized", ask client for roots ──
-                                if method == "initialized" && !roots_requested {
+                                if (method == "initialized" || method == "notifications/initialized") && !roots_requested {
                                     roots_requested = true;
                                     let _ = send_json(&mut stdout, &json!({
                                         "jsonrpc": "2.0",
@@ -92,8 +102,10 @@ pub async fn run_bridge(fallback_path: PathBuf, socket_path: &Path) -> Result<()
                                 }
 
                                 // ── Default: inject project_path, forward ──
+                                log_bridge(&format!("forwarding to daemon: method={}, id={:?}", method, msg_id));
                                 inject_project_path(&mut msg, &project_path);
                                 send_json(&mut sock_writer, &msg).await?;
+                                log_bridge(&format!("forwarded to daemon: method={}", method));
                             }
                             Err(_) => {
                                 // Not valid JSON — forward as-is
@@ -113,12 +125,21 @@ pub async fn run_bridge(fallback_path: PathBuf, socket_path: &Path) -> Result<()
                 match n {
                     Ok(0) => break, // EOF
                     Ok(_) => {
+                        log_bridge(&format!("recv from daemon: {}", sock_line.trim()));
                         // Filter out responses to bridge-internal requests
                         if let Ok(resp) = serde_json::from_str::<Value>(&sock_line) {
-                            if is_bridge_id(&resp.get("id").cloned(), REGISTER_ID)
-                                || is_bridge_id(&resp.get("id").cloned(), ACTIVATE_ID)
+                            let resp_id = resp.get("id").cloned();
+                            let resp_method = resp.get("method").and_then(|v| v.as_str());
+                            if is_bridge_id(&resp_id, REGISTER_ID)
+                                || is_bridge_id(&resp_id, ACTIVATE_ID)
                             {
+                                log_bridge("swallowing bridge-internal response");
                                 continue; // swallow
+                            }
+                            if let Some(method) = resp_method {
+                                log_bridge(&format!("forwarding request from daemon to client: method={}", method));
+                            } else {
+                                log_bridge(&format!("forwarding response from daemon to client: id={:?}", resp_id));
                             }
                         }
                         stdout.write_all(sock_line.as_bytes()).await?;

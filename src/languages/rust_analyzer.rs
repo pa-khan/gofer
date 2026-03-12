@@ -72,7 +72,7 @@ impl RustAnalyzer {
             .current_dir(&self.root_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::inherit())
             .kill_on_drop(true)
             .spawn()
             .context("Failed to spawn rust-analyzer")?;
@@ -161,10 +161,12 @@ impl RustAnalyzer {
                     }
                     Ok(None) => {
                         debug!("rust-analyzer stdout closed");
+                        pending_requests.write().await.clear();
                         break;
                     }
                     Err(e) => {
                         error!("Failed to read LSP message: {}", e);
+                        pending_requests.write().await.clear();
                         break;
                     }
                 }

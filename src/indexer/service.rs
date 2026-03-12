@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tokio::sync::{mpsc, Mutex, Semaphore};
+use tokio_util::sync::CancellationToken;
 
 use super::domains::{
     parse_backend_routes, parse_frontend_api_calls, paths_match, run_structural_fingerprinting,
@@ -268,6 +269,7 @@ impl IndexerService {
         extra_ignores: &[String],
         progress: Option<Arc<SyncProgress>>,
         metrics: Option<Arc<crate::daemon::state::DaemonMetrics>>,
+        cancel: CancellationToken,
     ) -> anyhow::Result<()> {
         let sync_start = std::time::Instant::now();
         tracing::info!("Starting full sync for: {:?}", root);
@@ -278,13 +280,14 @@ impl IndexerService {
         }
 
         // Arc clones — no ownership transfer, no loss on error
-        let metadata = pipeline::run_pipeline(
+        let metadata: Vec<pipeline::ParsedFileMetadata> = pipeline::run_pipeline(
             root,
             extra_ignores,
             self.sqlite.clone(),
             self.lance.clone(),
             self.embedder.clone(),
             progress.clone(),
+            cancel.clone(),
         )
         .await?;
 

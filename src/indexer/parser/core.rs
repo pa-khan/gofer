@@ -1,4 +1,5 @@
 use regex::Regex;
+use std::sync::OnceLock;
 use streaming_iterator::StreamingIterator;
 use thiserror::Error;
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, Tree};
@@ -22,8 +23,6 @@ pub enum ParserError {
     UnsupportedLanguage(String),
     #[error("Parse error")]
     ParseError,
-    #[error("Query error: {0}")]
-    QueryError(String),
 }
 
 pub type Result<T> = std::result::Result<T, ParserError>;
@@ -63,24 +62,48 @@ impl SupportedLanguage {
         }
     }
 
-    fn query_string(&self) -> &'static str {
-        match self {
-            Self::Rust => RUST_QUERY,
-            Self::TypeScript | Self::JavaScript => TYPESCRIPT_QUERY,
-            Self::Vue => VUE_QUERY,
-            Self::Python => PYTHON_QUERY,
-            Self::Go => GO_QUERY,
-        }
+    pub(crate) fn symbol_query(&self) -> &'static Query {
+        static RUST: OnceLock<Query> = OnceLock::new();
+        static TS: OnceLock<Query> = OnceLock::new();
+        static VUE: OnceLock<Query> = OnceLock::new();
+        static PY: OnceLock<Query> = OnceLock::new();
+        static GO: OnceLock<Query> = OnceLock::new();
+
+        let (lock, lang, query_str) = match self {
+            Self::Rust => (&RUST, self.tree_sitter_language(), RUST_QUERY),
+            Self::TypeScript | Self::JavaScript => {
+                (&TS, self.tree_sitter_language(), TYPESCRIPT_QUERY)
+            }
+            Self::Vue => (&VUE, self.tree_sitter_language(), VUE_QUERY),
+            Self::Python => (&PY, self.tree_sitter_language(), PYTHON_QUERY),
+            Self::Go => (&GO, self.tree_sitter_language(), GO_QUERY),
+        };
+
+        lock.get_or_init(|| {
+            Query::new(&lang, query_str).expect("Failed to compile tree-sitter symbol query")
+        })
     }
 
-    fn refs_query_string(&self) -> &'static str {
-        match self {
-            Self::Rust => RUST_REFS_QUERY,
-            Self::TypeScript | Self::JavaScript => TYPESCRIPT_REFS_QUERY,
-            Self::Vue => VUE_REFS_QUERY,
-            Self::Python => PYTHON_REFS_QUERY,
-            Self::Go => GO_REFS_QUERY,
-        }
+    pub(crate) fn refs_query(&self) -> &'static Query {
+        static RUST: OnceLock<Query> = OnceLock::new();
+        static TS: OnceLock<Query> = OnceLock::new();
+        static VUE: OnceLock<Query> = OnceLock::new();
+        static PY: OnceLock<Query> = OnceLock::new();
+        static GO: OnceLock<Query> = OnceLock::new();
+
+        let (lock, lang, query_str) = match self {
+            Self::Rust => (&RUST, self.tree_sitter_language(), RUST_REFS_QUERY),
+            Self::TypeScript | Self::JavaScript => {
+                (&TS, self.tree_sitter_language(), TYPESCRIPT_REFS_QUERY)
+            }
+            Self::Vue => (&VUE, self.tree_sitter_language(), VUE_REFS_QUERY),
+            Self::Python => (&PY, self.tree_sitter_language(), PYTHON_REFS_QUERY),
+            Self::Go => (&GO, self.tree_sitter_language(), GO_REFS_QUERY),
+        };
+
+        lock.get_or_init(|| {
+            Query::new(&lang, query_str).expect("Failed to compile tree-sitter refs query")
+        })
     }
 }
 
@@ -486,14 +509,13 @@ impl CodeParser {
             .parse(content, self.old_tree.as_ref())
             .ok_or(ParserError::ParseError)?;
 
-        let query = Query::new(&language.tree_sitter_language(), language.query_string())
-            .map_err(|e| ParserError::QueryError(e.message.to_string()))?;
+        let query = language.symbol_query();
 
         let mut cursor = QueryCursor::new();
         let mut symbols = Vec::new();
         let capture_names = query.capture_names();
 
-        let mut matches = cursor.matches(&query, tree.root_node(), content.as_bytes());
+        let mut matches = cursor.matches(query, tree.root_node(), content.as_bytes());
         while let Some(match_) = matches.next() {
             let mut name = String::new();
             let mut kind = String::new();
@@ -603,14 +625,13 @@ impl CodeParser {
             .parse(content, self.old_tree.as_ref())
             .ok_or(ParserError::ParseError)?;
 
-        let query = Query::new(&language.tree_sitter_language(), language.query_string())
-            .map_err(|e| ParserError::QueryError(e.message.to_string()))?;
+        let query = language.symbol_query();
 
         let mut cursor = QueryCursor::new();
         let mut chunks = Vec::new();
         let capture_names = query.capture_names();
 
-        let mut matches = cursor.matches(&query, tree.root_node(), content.as_bytes());
+        let mut matches = cursor.matches(query, tree.root_node(), content.as_bytes());
         while let Some(match_) = matches.next() {
             let mut name = String::new();
             let mut kind = String::new();
@@ -777,18 +798,14 @@ impl CodeParser {
             .parse(content, None)
             .ok_or(ParserError::ParseError)?;
 
-        let query = Query::new(
-            &language.tree_sitter_language(),
-            language.refs_query_string(),
-        )
-        .map_err(|e| ParserError::QueryError(e.message.to_string()))?;
+        let query = language.refs_query();
 
         let mut cursor = QueryCursor::new();
         let mut refs = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let capture_names = query.capture_names();
 
-        let mut matches = cursor.matches(&query, tree.root_node(), content.as_bytes());
+        let mut matches = cursor.matches(query, tree.root_node(), content.as_bytes());
         while let Some(match_) = matches.next() {
             for capture in match_.captures {
                 let capture_name = capture_names[capture.index as usize];
@@ -1302,20 +1319,18 @@ impl CodeParser {
         let code = content.as_bytes();
 
         // 1. Symbols — via symbol query
-        let sym_query = Query::new(&lang, language.query_string())
-            .map_err(|e| ParserError::QueryError(e.message.to_string()))?;
-        let symbols = Self::extract_symbols_from_tree(root, content, &sym_query);
+        let sym_query = language.symbol_query();
+        let symbols = Self::extract_symbols_from_tree(root, content, sym_query);
 
         // 2. Smart chunks from tree walk (preferred), fallback to query-based chunks
         let chunks =
             smart_chunk_from_root(root, content, file_path, language).unwrap_or_else(|_| {
-                Self::extract_chunks_from_tree(root, content, file_path, &sym_query)
+                Self::extract_chunks_from_tree(root, content, file_path, sym_query)
             });
 
         // 3. References — via refs query
-        let refs_query = Query::new(&lang, language.refs_query_string())
-            .map_err(|e| ParserError::QueryError(e.message.to_string()))?;
-        let refs = Self::extract_refs_from_tree(root, content, &refs_query);
+        let refs_query = language.refs_query();
+        let refs = Self::extract_refs_from_tree(root, content, refs_query);
 
         // 4. Imports — via tree walk
         let imports = match language {

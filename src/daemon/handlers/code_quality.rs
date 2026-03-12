@@ -140,18 +140,19 @@ pub async fn tool_lint_file(args: Value, ctx: &ToolContext) -> Result<Value> {
         }
     };
 
-    let warnings: Vec<Value> = result
+    let warnings: Vec<String> = result
         .warnings
         .iter()
         .map(|w| {
-            json!({
-                "line": w.line,
-                "column": w.column,
-                "severity": w.severity,
-                "message": w.message,
-                "code": w.code,
-                "fix_available": w.fix_available,
-            })
+            let fix = if w.fix_available {
+                " [fix-available]"
+            } else {
+                ""
+            };
+            format!(
+                "{}:{} [{}] {}: {}{}",
+                w.line, w.column, w.severity, w.code, w.message, fix
+            )
         })
         .collect();
 

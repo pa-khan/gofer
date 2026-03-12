@@ -54,10 +54,11 @@ pub async fn tool_project_tree(args: Value, ctx: &ToolContext) -> Result<Value> 
             }
         }
 
-        tree.push(json!({
-            "path": relative,
-            "type": if e.file_type().is_dir() { "directory" } else { "file" }
-        }));
+        tree.push(if e.file_type().is_dir() {
+            format!("{}/", relative)
+        } else {
+            relative
+        });
     }
 
     Ok(json!({
@@ -73,12 +74,13 @@ pub async fn tool_get_dependencies(args: Value, ctx: &ToolContext) -> Result<Val
 
     Ok(json!({
         "total": deps.len(),
-        "dependencies": deps.iter().map(|dep| json!({
-            "name": dep.name,
-            "version": dep.version,
-            "ecosystem": dep.ecosystem,
-            "dev_only": dep.dev_only == 1
-        })).collect::<Vec<_>>()
+        "dependencies": deps.iter().map(|dep| {
+            if dep.dev_only == 1 {
+                format!("{}@{} ({}) [dev]", dep.name, dep.version, dep.ecosystem)
+            } else {
+                format!("{}@{} ({})", dep.name, dep.version, dep.ecosystem)
+            }
+        }).collect::<Vec<_>>()
     }))
 }
 
@@ -94,23 +96,22 @@ pub async fn tool_dependency_impact(args: Value, ctx: &ToolContext) -> Result<Va
     Ok(json!({
         "dependency": name,
         "total": usages.len(),
-        "usages": usages.iter().map(|u| json!({
-            "file_path": make_relative(&ctx.root_path, &u.file_path),
-            "line": u.line,
-            "usage_type": u.usage_type,
-            "import_path": u.import_path
-        })).collect::<Vec<_>>()
+        "usages": usages.iter().map(|u| {
+            format!("{}:{} ({})", make_relative(&ctx.root_path, &u.file_path), u.line, u.usage_type)
+        }).collect::<Vec<_>>()
     }))
 }
 
 pub async fn tool_domain_stats(ctx: &ToolContext) -> Result<Value> {
     let stats = &ctx.sqlite.get_domain_stats().await?;
 
+    let mut domains_map = serde_json::Map::new();
+    for (domain, count) in stats {
+        domains_map.insert(domain.clone(), json!(count));
+    }
+
     Ok(json!({
-        "domains": stats.iter().map(|(domain, count)| json!({
-            "domain": domain,
-            "file_count": count
-        })).collect::<Vec<_>>()
+        "domains": Value::Object(domains_map)
     }))
 }
 
@@ -124,12 +125,7 @@ pub async fn tool_get_api_routes(args: Value, ctx: &ToolContext) -> Result<Value
         let endpoints = &ctx.sqlite.get_api_endpoints().await?;
         backend_routes = endpoints
             .iter()
-            .map(|ep| {
-                json!({
-                    "method": ep.method,
-                    "path": ep.path
-                })
-            })
+            .map(|ep| format!("{} {}", ep.method, ep.path))
             .collect();
     }
 
@@ -137,12 +133,7 @@ pub async fn tool_get_api_routes(args: Value, ctx: &ToolContext) -> Result<Value
         let calls = &ctx.sqlite.get_frontend_api_calls().await?;
         frontend_calls = calls
             .iter()
-            .map(|call| {
-                json!({
-                    "method": call.method,
-                    "path": call.path
-                })
-            })
+            .map(|call| format!("{} {}", call.method.as_deref().unwrap_or("GET"), call.path))
             .collect();
     }
 

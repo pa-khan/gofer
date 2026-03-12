@@ -93,9 +93,7 @@ pub async fn tool_lang_tools_call(args: Value, ctx: &ToolContext) -> Result<Valu
         for tool_def in service.tools() {
             if tool_def.name == tool_name {
                 // Found the tool - execute it
-                let result = service
-                    .call_tool(tool_name, tool_args, &ctx.root_path)
-                    .await?;
+                let result = service.call_tool(tool_name, tool_args, ctx).await?;
 
                 return Ok(json!({
                     "tool": tool_name,

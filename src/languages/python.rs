@@ -1106,7 +1106,13 @@ impl LanguageService for PythonService {
         ]
     }
 
-    async fn call_tool(&self, name: &str, args: Value, root: &Path) -> Result<String> {
+    async fn call_tool(
+        &self,
+        name: &str,
+        args: Value,
+        ctx: &crate::daemon::tools::ToolContext,
+    ) -> Result<String> {
+        let root = ctx.root_path.as_path();
         match name {
             "python_read_manifest" => self.tool_read_manifest(root).await,
             "python_resolve_import" => {

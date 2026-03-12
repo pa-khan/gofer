@@ -291,7 +291,13 @@ impl LanguageService for TypeScriptService {
         ]
     }
 
-    async fn call_tool(&self, name: &str, args: Value, root: &Path) -> Result<String> {
+    async fn call_tool(
+        &self,
+        name: &str,
+        args: Value,
+        ctx: &crate::daemon::tools::ToolContext,
+    ) -> Result<String> {
+        let root = ctx.root_path.as_path();
         match name {
             "ts_inspect_type" => self.tool_inspect_type(args, root).await,
             "ts_get_signature" => self.tool_get_signature(args, root).await,

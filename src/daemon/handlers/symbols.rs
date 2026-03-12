@@ -33,7 +33,10 @@ pub async fn tool_get_symbols(args: Value, ctx: &ToolContext) -> Result<Value> {
                     .map(|s| {
                         // Deserialize ArchivedSymbolKind to SymbolKind using trait method
                         use rkyv::Deserialize;
-                        let kind = s.kind.deserialize(&mut rkyv::Infallible).unwrap();
+                        let kind = match s.kind.deserialize(&mut rkyv::Infallible) {
+                            Ok(k) => k,
+                            Err(_) => unreachable!("Infallible deserialization"),
+                        };
 
                         SymbolWithPath {
                             id: s.id,
@@ -48,18 +51,26 @@ pub async fn tool_get_symbols(args: Value, ctx: &ToolContext) -> Result<Value> {
                     .collect();
 
                 let count = symbols.len() as u32;
+
+                let mut symbols_map: std::collections::HashMap<String, Vec<String>> =
+                    std::collections::HashMap::new();
+                for sym in &symbols {
+                    let path = make_relative(&ctx.root_path, &sym.file_path);
+                    let sig_str = sym.signature.as_deref().unwrap_or("");
+                    let entry = if sig_str.is_empty() {
+                        format!("{}: {:?} '{}'", sym.line, sym.kind, sym.name)
+                    } else {
+                        format!("{}: {:?} '{}' ({})", sym.line, sym.kind, sym.name, sig_str)
+                    };
+                    symbols_map.entry(path).or_default().push(entry);
+                }
+
                 let final_result = json!({
                     "total": count,
                     "offset": offset,
                     "limit": limit,
                     "has_more": count == limit,
-                    "symbols": symbols.iter().map(|sym| json!({
-                        "name": sym.name,
-                        "kind": sym.kind,
-                        "file_path": make_relative(&ctx.root_path, &sym.file_path),
-                        "line": sym.line,
-                        "signature": sym.signature
-                    })).collect::<Vec<_>>()
+                    "symbols": symbols_map
                 });
 
                 return Ok(final_result);
@@ -79,18 +90,25 @@ pub async fn tool_get_symbols(args: Value, ctx: &ToolContext) -> Result<Value> {
         .await?;
     let count = symbols.len() as u32;
 
+    let mut symbols_map: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for sym in symbols {
+        let path = make_relative(&ctx.root_path, &sym.file_path);
+        let sig_str = sym.signature.as_deref().unwrap_or("");
+        let entry = if sig_str.is_empty() {
+            format!("{}: {:?} '{}'", sym.line, sym.kind, sym.name)
+        } else {
+            format!("{}: {:?} '{}' ({})", sym.line, sym.kind, sym.name, sig_str)
+        };
+        symbols_map.entry(path).or_default().push(entry);
+    }
+
     let final_result = json!({
         "total": count,
         "offset": offset,
         "limit": limit,
         "has_more": count == limit,
-        "symbols": symbols.iter().map(|sym| json!({
-            "name": sym.name,
-            "kind": sym.kind,
-            "file_path": make_relative(&ctx.root_path, &sym.file_path),
-            "line": sym.line,
-            "signature": sym.signature
-        })).collect::<Vec<_>>()
+        "symbols": symbols_map
     });
 
     // Store in rkyv cache
@@ -113,11 +131,9 @@ pub async fn tool_get_references(args: Value, ctx: &ToolContext) -> Result<Value
     Ok(json!({
         "symbol": symbol,
         "total": refs.len(),
-        "references": refs.iter().map(|r| json!({
-            "file_path": make_relative(&ctx.root_path, &r.file_path),
-            "line": r.line,
-            "ref_kind": r.ref_kind
-        })).collect::<Vec<_>>()
+        "references": refs.iter().map(|r| {
+            format!("{}:{} ({})", make_relative(&ctx.root_path, &r.file_path), r.line, r.ref_kind)
+        }).collect::<Vec<_>>()
     }))
 }
 
@@ -146,16 +162,23 @@ pub async fn tool_search_symbols(args: Value, ctx: &ToolContext) -> Result<Value
     };
     filtered.truncate(limit);
 
+    let mut symbols_map: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for sym in &filtered {
+        let path = make_relative(&ctx.root_path, &sym.file_path);
+        let sig_str = sym.signature.as_deref().unwrap_or("");
+        let entry = if sig_str.is_empty() {
+            format!("{}: {:?} '{}'", sym.line, sym.kind, sym.name)
+        } else {
+            format!("{}: {:?} '{}' ({})", sym.line, sym.kind, sym.name, sig_str)
+        };
+        symbols_map.entry(path).or_default().push(entry);
+    }
+
     Ok(json!({
         "query": query,
         "total": filtered.len(),
-        "symbols": filtered.iter().map(|sym| json!({
-            "name": sym.name,
-            "kind": sym.kind,
-            "file_path": make_relative(&ctx.root_path, &sym.file_path),
-            "line": sym.line,
-            "signature": sym.signature
-        })).collect::<Vec<_>>()
+        "symbols": symbols_map
     }))
 }
 
@@ -177,11 +200,9 @@ pub async fn tool_get_callers(args: Value, ctx: &ToolContext) -> Result<Value> {
     Ok(json!({
         "symbol": symbol,
         "total": callers.len(),
-        "callers": callers.iter().map(|r| json!({
-            "file_path": make_relative(&ctx.root_path, &r.file_path),
-            "line": r.line,
-            "kind": r.ref_kind
-        })).collect::<Vec<_>>()
+        "callers": callers.iter().map(|r| {
+            format!("{}:{} ({})", make_relative(&ctx.root_path, &r.file_path), r.line, r.ref_kind)
+        }).collect::<Vec<_>>()
     }))
 }
 

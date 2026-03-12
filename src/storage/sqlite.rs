@@ -118,6 +118,12 @@ impl SqliteStorage {
         sqlx::query("PRAGMA synchronous = NORMAL")
             .execute(&pool)
             .await?;
+        sqlx::query("PRAGMA busy_timeout = 5000")
+            .execute(&pool)
+            .await?;
+        sqlx::query("PRAGMA auto_vacuum = INCREMENTAL")
+            .execute(&pool)
+            .await?;
         sqlx::query("PRAGMA cache_size = -64000") // 64MB cache
             .execute(&pool)
             .await?;
@@ -285,21 +291,27 @@ impl SqliteStorage {
             .execute(&mut *tx)
             .await?;
 
-        for symbol in symbols {
-            sqlx::query(
-                r#"
-                INSERT INTO symbols (file_id, name, kind, line_start, line_end, signature)
-                VALUES (?, ?, ?, ?, ?, ?)
-                "#,
-            )
-            .bind(file_id)
-            .bind(&symbol.name)
-            .bind(symbol.kind)
-            .bind(symbol.line_start)
-            .bind(symbol.line_end)
-            .bind(&symbol.signature)
-            .execute(&mut *tx)
-            .await?;
+        if !symbols.is_empty() {
+            // SQLite has a limit on bound parameters (usually 32766).
+            // We bind 6 parameters per row, so ~5000 rows max.
+            // Chunking by 1000 is perfectly safe.
+            for chunk in symbols.chunks(1000) {
+                let mut query_builder = sqlx::QueryBuilder::new(
+                    "INSERT INTO symbols (file_id, name, kind, line_start, line_end, signature) ",
+                );
+
+                query_builder.push_values(chunk, |mut b, symbol| {
+                    b.push_bind(file_id)
+                        .push_bind(&symbol.name)
+                        .push_bind(symbol.kind)
+                        .push_bind(symbol.line_start)
+                        .push_bind(symbol.line_end)
+                        .push_bind(&symbol.signature);
+                });
+
+                let query = query_builder.build();
+                query.execute(&mut *tx).await?;
+            }
         }
 
         tx.commit().await?;
@@ -490,20 +502,24 @@ impl SqliteStorage {
             .execute(&mut *tx)
             .await?;
 
-        for r in refs {
-            sqlx::query(
-                r#"
-                INSERT INTO symbol_references (source_symbol_id, target_name, target_symbol_id, kind, line)
-                VALUES (?, ?, ?, ?, ?)
-                "#
-            )
-            .bind(symbol_id)
-            .bind(&r.target_name)
-            .bind(r.target_symbol_id)
-            .bind(&r.kind)
-            .bind(r.line)
-            .execute(&mut *tx)
-            .await?;
+        if !refs.is_empty() {
+            // Chunking by 1000 rows (5 parameters per row = 5000 bound parameters < 32766 limit)
+            for chunk in refs.chunks(1000) {
+                let mut query_builder = sqlx::QueryBuilder::new(
+                    "INSERT INTO symbol_references (source_symbol_id, target_name, target_symbol_id, kind, line) "
+                );
+
+                query_builder.push_values(chunk, |mut b, r| {
+                    b.push_bind(symbol_id)
+                        .push_bind(&r.target_name)
+                        .push_bind(r.target_symbol_id)
+                        .push_bind(&r.kind)
+                        .push_bind(r.line);
+                });
+
+                let query = query_builder.build();
+                query.execute(&mut *tx).await?;
+            }
         }
 
         tx.commit().await?;
@@ -1555,10 +1571,18 @@ impl SqliteStorage {
 
     /// Recover stuck items: reset 'processing' → 'pending' (call on startup).
     pub async fn recover_summary_queue(&self) -> Result<u64> {
-        let result =
-            sqlx::query("UPDATE summary_queue SET status = 'pending' WHERE status = 'processing'")
-                .execute(&self.pool)
-                .await?;
+        // Use UPDATE OR IGNORE to prevent unique constraint violations
+        let result = sqlx::query(
+            "UPDATE OR IGNORE summary_queue SET status = 'pending' WHERE status = 'processing'",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Delete any remaining 'processing' items that couldn't be updated due to conflicts
+        sqlx::query("DELETE FROM summary_queue WHERE status = 'processing'")
+            .execute(&self.pool)
+            .await?;
+
         Ok(result.rows_affected())
     }
 

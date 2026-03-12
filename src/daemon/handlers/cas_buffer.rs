@@ -3,12 +3,12 @@
 //! Революционная система: AI оперирует хешами вместо копирования кода.
 //!
 //! Implements:
-//! - extract_to_hash - создать хеш из блока кода (copy/cut)
-//! - insert_hash - вставить код по хешу
-//! - replace_with_hash - заменить блок кода на содержимое хеша
-//! - content_to_hash - создать хеш из произвольного контента
-//! - list_buffers - показать активные хеши
-//! - clear_buffer - удалить хеш из памяти
+//! - extract_to_clipboard - создать хеш из блока кода (copy/cut)
+//! - insert_clipboard - вставить код по хешу
+//! - replace_with_clipboard - заменить блок кода на содержимое хеша
+//! - content_to_clipboard - создать хеш из произвольного контента
+//! - list_clipboards - показать активные хеши
+//! - clear_clipboard - удалить хеш из памяти
 //! - apply_template - шаблонизация с подстановкой хешей
 
 use super::common::{resolve_path_buf, ToolContext};
@@ -24,7 +24,7 @@ use tokio::sync::RwLock;
 /// Content buffer metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentBuffer {
-    pub hash_id: String,
+    pub clipboard_id: String,
     pub content: String,
     pub size_bytes: usize,
     pub lines: usize,
@@ -45,7 +45,7 @@ const MAX_BUFFER_SIZE_BYTES: usize = 1024 * 1024; // 1 MB
 const MAX_BUFFERS: usize = 1000;
 
 /// Extract code block to hash
-pub async fn tool_extract_to_hash(args: Value, ctx: &ToolContext) -> Result<Value> {
+pub async fn tool_extract_to_clipboard(args: Value, ctx: &ToolContext) -> Result<Value> {
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
@@ -100,11 +100,11 @@ pub async fn tool_extract_to_hash(args: Value, ctx: &ToolContext) -> Result<Valu
     }
 
     // Calculate hash (first 8 chars of SHA256)
-    let hash_id = calculate_hash(&block_content);
+    let clipboard_id = calculate_hash(&block_content);
 
     // Store in buffer
     let buffer = ContentBuffer {
-        hash_id: hash_id.clone(),
+        clipboard_id: clipboard_id.clone(),
         content: block_content.clone(),
         size_bytes: block_content.len(),
         lines: block_lines.len(),
@@ -136,7 +136,7 @@ pub async fn tool_extract_to_hash(args: Value, ctx: &ToolContext) -> Result<Valu
     // Store buffer
     {
         let mut buffers = BUFFERS.write().await;
-        buffers.insert(hash_id.clone(), buffer);
+        buffers.insert(clipboard_id.clone(), buffer);
     }
 
     // If cut mode, remove block from file
@@ -166,7 +166,7 @@ pub async fn tool_extract_to_hash(args: Value, ctx: &ToolContext) -> Result<Valu
     }
 
     Ok(json!({
-        "hash_id": hash_id,
+        "clipboard_id": clipboard_id,
         "size": format_bytes(block_content.len()),
         "size_bytes": block_content.len(),
         "lines": block_lines.len(),
@@ -177,7 +177,7 @@ pub async fn tool_extract_to_hash(args: Value, ctx: &ToolContext) -> Result<Valu
 }
 
 /// Insert hash content at specified line
-pub async fn tool_insert_hash(args: Value, ctx: &ToolContext) -> Result<Value> {
+pub async fn tool_insert_clipboard(args: Value, ctx: &ToolContext) -> Result<Value> {
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
@@ -189,21 +189,21 @@ pub async fn tool_insert_hash(args: Value, ctx: &ToolContext) -> Result<Value> {
         .ok_or_else(|| GoferError::InvalidParams("line_number is required".into()))?
         as usize;
 
-    let hash_id = args
-        .get("hash_id")
+    let clipboard_id = args
+        .get("clipboard_id")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| GoferError::InvalidParams("hash_id is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("clipboard_id is required".into()))?;
 
     // Get buffer content
     let buffer_content = {
         let mut buffers = BUFFERS.write().await;
         let buffer = buffers
-            .get_mut(hash_id)
-            .ok_or_else(|| GoferError::InvalidParams(format!("Hash not found: {}", hash_id)))?;
+            .get_mut(clipboard_id)
+            .ok_or_else(|| GoferError::InvalidParams(format!("Clipboard item not found: {}", clipboard_id)))?;
 
         // Check expiration
         if Utc::now() > buffer.expires_at {
-            return Err(GoferError::InvalidParams(format!("Hash expired: {}", hash_id)).into());
+            return Err(GoferError::InvalidParams(format!("Clipboard item expired: {}", clipboard_id)).into());
         }
 
         // Increment access count
@@ -252,7 +252,7 @@ pub async fn tool_insert_hash(args: Value, ctx: &ToolContext) -> Result<Value> {
 
     Ok(json!({
         "path": path,
-        "hash_id": hash_id,
+        "clipboard_id": clipboard_id,
         "inserted_at_line": line_number,
         "lines_inserted": buffer_lines.len(),
         "status": "inserted",
@@ -260,7 +260,7 @@ pub async fn tool_insert_hash(args: Value, ctx: &ToolContext) -> Result<Value> {
 }
 
 /// Replace code block with hash content
-pub async fn tool_replace_with_hash(args: Value, ctx: &ToolContext) -> Result<Value> {
+pub async fn tool_replace_with_clipboard(args: Value, ctx: &ToolContext) -> Result<Value> {
     let path = args
         .get("path")
         .and_then(|v| v.as_str())
@@ -278,20 +278,20 @@ pub async fn tool_replace_with_hash(args: Value, ctx: &ToolContext) -> Result<Va
         .ok_or_else(|| GoferError::InvalidParams("end_line is required".into()))?
         as usize;
 
-    let hash_id = args
-        .get("hash_id")
+    let clipboard_id = args
+        .get("clipboard_id")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| GoferError::InvalidParams("hash_id is required".into()))?;
+        .ok_or_else(|| GoferError::InvalidParams("clipboard_id is required".into()))?;
 
     // Get buffer content
     let buffer_content = {
         let mut buffers = BUFFERS.write().await;
         let buffer = buffers
-            .get_mut(hash_id)
-            .ok_or_else(|| GoferError::InvalidParams(format!("Hash not found: {}", hash_id)))?;
+            .get_mut(clipboard_id)
+            .ok_or_else(|| GoferError::InvalidParams(format!("Clipboard item not found: {}", clipboard_id)))?;
 
         if Utc::now() > buffer.expires_at {
-            return Err(GoferError::InvalidParams(format!("Hash expired: {}", hash_id)).into());
+            return Err(GoferError::InvalidParams(format!("Clipboard item expired: {}", clipboard_id)).into());
         }
 
         buffer.access_count += 1;
@@ -336,7 +336,7 @@ pub async fn tool_replace_with_hash(args: Value, ctx: &ToolContext) -> Result<Va
 
     Ok(json!({
         "path": path,
-        "hash_id": hash_id,
+        "clipboard_id": clipboard_id,
         "replaced_lines": format!("{}-{}", start_line, end_line),
         "new_lines": buffer_lines.len(),
         "status": "replaced",
@@ -344,7 +344,7 @@ pub async fn tool_replace_with_hash(args: Value, ctx: &ToolContext) -> Result<Va
 }
 
 /// Create hash from arbitrary content
-pub async fn tool_content_to_hash(args: Value, _ctx: &ToolContext) -> Result<Value> {
+pub async fn tool_content_to_clipboard(args: Value, _ctx: &ToolContext) -> Result<Value> {
     let content = args
         .get("content")
         .and_then(|v| v.as_str())
@@ -359,11 +359,11 @@ pub async fn tool_content_to_hash(args: Value, _ctx: &ToolContext) -> Result<Val
         .into());
     }
 
-    let hash_id = calculate_hash(content);
+    let clipboard_id = calculate_hash(content);
     let lines = content.lines().count();
 
     let buffer = ContentBuffer {
-        hash_id: hash_id.clone(),
+        clipboard_id: clipboard_id.clone(),
         content: content.to_string(),
         size_bytes: content.len(),
         lines,
@@ -383,7 +383,7 @@ pub async fn tool_content_to_hash(args: Value, _ctx: &ToolContext) -> Result<Val
 
     {
         let mut buffers = BUFFERS.write().await;
-        buffers.insert(hash_id.clone(), buffer);
+        buffers.insert(clipboard_id.clone(), buffer);
     }
 
     // Generate preview
@@ -394,7 +394,7 @@ pub async fn tool_content_to_hash(args: Value, _ctx: &ToolContext) -> Result<Val
     }
 
     Ok(json!({
-        "hash_id": hash_id,
+        "clipboard_id": clipboard_id,
         "size": format_bytes(content.len()),
         "lines": lines,
         "preview": preview,
@@ -403,7 +403,7 @@ pub async fn tool_content_to_hash(args: Value, _ctx: &ToolContext) -> Result<Val
 }
 
 /// List all active buffers
-pub async fn tool_list_buffers(_args: Value, _ctx: &ToolContext) -> Result<Value> {
+pub async fn tool_list_clipboards(_args: Value, _ctx: &ToolContext) -> Result<Value> {
     // Cleanup expired first
     cleanup_expired_buffers().await;
 
@@ -416,7 +416,7 @@ pub async fn tool_list_buffers(_args: Value, _ctx: &ToolContext) -> Result<Value
             let ttl = buf.expires_at.signed_duration_since(Utc::now());
 
             json!({
-                "hash_id": buf.hash_id,
+                "clipboard_id": buf.clipboard_id,
                 "size": format_bytes(buf.size_bytes),
                 "lines": buf.lines,
                 "source_file": buf.source_file,
@@ -437,20 +437,20 @@ pub async fn tool_list_buffers(_args: Value, _ctx: &ToolContext) -> Result<Value
 }
 
 /// Clear specific buffer or all buffers
-pub async fn tool_clear_buffer(args: Value, _ctx: &ToolContext) -> Result<Value> {
-    let hash_id = args.get("hash_id").and_then(|v| v.as_str());
+pub async fn tool_clear_clipboard(args: Value, _ctx: &ToolContext) -> Result<Value> {
+    let clipboard_id = args.get("clipboard_id").and_then(|v| v.as_str());
 
     let mut buffers = BUFFERS.write().await;
 
-    if let Some(id) = hash_id {
+    if let Some(id) = clipboard_id {
         // Clear specific buffer
         if buffers.remove(id).is_some() {
             Ok(json!({
-                "hash_id": id,
+                "clipboard_id": id,
                 "status": "cleared",
             }))
         } else {
-            Err(GoferError::InvalidParams(format!("Hash not found: {}", id)).into())
+            Err(GoferError::InvalidParams(format!("Clipboard item not found: {}", id)).into())
         }
     } else {
         // Clear all buffers

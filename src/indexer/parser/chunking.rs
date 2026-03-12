@@ -6,10 +6,10 @@ use crate::models::{CodeChunk, SymbolKind};
 
 // === Семантический AST-чанкинг (Smart Chunking) ===
 
-/// Максимальный размер чанка в байтах (~512 токенов)
-const MAX_CHUNK_BYTES: usize = 2048;
+/// Максимальный размер чанка в байтах (~2048 токенов)
+const MAX_CHUNK_BYTES: usize = 8192;
 /// Минимальный размер чанка (не создаём слишком мелкие)
-const MIN_CHUNK_BYTES: usize = 64;
+const MIN_CHUNK_BYTES: usize = 256;
 
 /// Семантический чанкинг файла на основе tree-sitter AST.
 /// Уважает границы функций, классов и структур.

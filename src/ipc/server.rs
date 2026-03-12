@@ -160,13 +160,16 @@ async fn handle_connection(stream: tokio::net::UnixStream, state: Arc<DaemonStat
                 -32000,
                 "Rate limit exceeded (100 req/s per connection)".into(),
             );
-            let out = serde_json::to_string(&resp)?;
+            let out =
+                simd_json::to_string(&resp).map_err(|e| anyhow::anyhow!("simd_json: {}", e))?;
             let _ = write_tx.send(out).await;
             continue;
         }
 
         // Try to parse as batch (JSON array) first, then single request
-        let parsed: Result<Value, _> = serde_json::from_str(trimmed);
+        let mut parse_bytes = trimmed.as_bytes().to_vec();
+        let parsed: Result<Value, _> =
+            simd_json::from_slice(&mut parse_bytes).map_err(|e| anyhow::anyhow!("{}", e));
 
         match parsed {
             Ok(Value::Array(batch)) if !batch.is_empty() => {
@@ -178,11 +181,19 @@ async fn handle_connection(stream: tokio::net::UnixStream, state: Arc<DaemonStat
                         let st = state_clone.clone();
                         tokio::spawn(async move {
                             match serde_json::from_value::<DaemonRequest>(v) {
-                                Ok(req) => handle_request(req, &st).await,
+                                Ok(req) => {
+                                    let is_notification = req.id.is_none();
+                                    let resp = handle_request(req, &st).await;
+                                    if is_notification {
+                                        None
+                                    } else {
+                                        Some(resp)
+                                    }
+                                }
                                 Err(e) => {
                                     let (code, msg) =
                                         GoferError::ParseError(e.to_string()).into_rpc();
-                                    DaemonResponse::error(Value::Null, code, msg)
+                                    Some(DaemonResponse::error(Value::Null, code, msg))
                                 }
                             }
                         })
@@ -192,19 +203,25 @@ async fn handle_connection(stream: tokio::net::UnixStream, state: Arc<DaemonStat
                 // Await all in parallel and collect results
                 let mut responses = Vec::with_capacity(handles.len());
                 for handle in handles {
-                    if let Ok(resp) = handle.await {
+                    if let Ok(Some(resp)) = handle.await {
                         responses.push(resp);
                     }
                 }
 
                 // Send batch response as JSON array
-                let out = serde_json::to_string(&responses)?;
-                let _ = write_tx.send(out).await;
+                if !responses.is_empty() {
+                    let out = simd_json::to_string(&responses)
+                        .map_err(|e| anyhow::anyhow!("simd_json: {}", e))?;
+                    let _ = write_tx.send(out).await;
+                }
             }
             _ => {
                 // Single request (original logic)
-                let response = match serde_json::from_str::<DaemonRequest>(trimmed) {
+                let mut single_bytes = trimmed.as_bytes().to_vec();
+                let response = match simd_json::from_slice::<DaemonRequest>(&mut single_bytes) {
                     Ok(req) => {
+                        let is_notification = req.id.is_none();
+
                         // Check for progress token in _meta
                         let progress_token = req
                             .params
@@ -240,7 +257,7 @@ async fn handle_connection(stream: tokio::net::UnixStream, state: Arc<DaemonStat
                                             snap.files_total,
                                             &stage,
                                         );
-                                        if let Ok(msg) = serde_json::to_string(&notif) {
+                                        if let Ok(msg) = simd_json::to_string(&notif) {
                                             if notif_tx.send(msg).await.is_err() {
                                                 break;
                                             }
@@ -262,16 +279,23 @@ async fn handle_connection(stream: tokio::net::UnixStream, state: Arc<DaemonStat
                             cancel.cancel();
                         }
 
-                        resp
+                        if is_notification {
+                            None
+                        } else {
+                            Some(resp)
+                        }
                     }
                     Err(e) => {
                         let (code, msg) = GoferError::ParseError(e.to_string()).into_rpc();
-                        DaemonResponse::error(Value::Null, code, msg)
+                        Some(DaemonResponse::error(Value::Null, code, msg))
                     }
                 };
 
-                let out = serde_json::to_string(&response)?;
-                let _ = write_tx.send(out).await;
+                if let Some(resp) = response {
+                    let out = simd_json::to_string(&resp)
+                        .map_err(|e| anyhow::anyhow!("simd_json: {}", e))?;
+                    let _ = write_tx.send(out).await;
+                }
             }
         }
     }
@@ -368,8 +392,15 @@ async fn handle_activate_project(
         .get("watch")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
+    let background = params
+        .get("background")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
-    match state.activate_project(project_path, watch).await {
+    match state
+        .activate_project(project_path, watch, background)
+        .await
+    {
         Ok(msg) => DaemonResponse::success(id, json!({ "message": msg })),
         Err(e) => DaemonResponse::error(id, -32000, format!("Activation failed: {}", e)),
     }
@@ -613,10 +644,22 @@ async fn handle_tools_call(
         Err(e) => return DaemonResponse::error(id, -32000, format!("Project load failed: {}", e)),
     };
 
+    let ctx = tools::ToolContext {
+        sqlite: Arc::new(project.sqlite.clone()),
+        lance: Arc::clone(&project.lance),
+        embedder: Arc::clone(&state.embedder),
+        root_path: Arc::new(project.path.clone()),
+        cache: Arc::clone(&project.cache),
+        embedding_circuit: Arc::clone(&state.embedding_circuit),
+        vector_circuit: Arc::clone(&state.vector_circuit),
+        rust_analyzer: Arc::clone(&project.rust_analyzer),
+        language_services: Arc::clone(&project.language_services),
+    };
+
     // Try language services first
     for svc in project.language_services.iter() {
         if svc.tools().iter().any(|t| t.name == name) {
-            let result = svc.call_tool(name, args, &project.path).await;
+            let result = svc.call_tool(name, args, &ctx).await;
             return match result {
                 Ok(text) => DaemonResponse::success(
                     id,
@@ -635,18 +678,6 @@ async fn handle_tools_call(
 
     // Core tools
     let start = std::time::Instant::now();
-    let ctx = tools::ToolContext {
-        sqlite: Arc::new(project.sqlite.clone()),
-        lance: Arc::clone(&project.lance),
-        embedder: Arc::clone(&state.embedder),
-        reranker: Arc::clone(&state.reranker),
-        root_path: Arc::new(project.path.clone()),
-        cache: Arc::clone(&project.cache),
-        embedding_circuit: Arc::clone(&state.embedding_circuit), // Feature 016
-        vector_circuit: Arc::clone(&state.vector_circuit),       // Feature 016
-        rust_analyzer: Arc::clone(&project.rust_analyzer),
-        language_services: Arc::clone(&project.language_services),
-    };
 
     let result: anyhow::Result<serde_json::Value> = tools::dispatch(name, args.clone(), &ctx).await;
     let elapsed_us = start.elapsed().as_micros() as usize;
@@ -748,7 +779,6 @@ async fn handle_resources_read(
         sqlite: Arc::new(project.sqlite.clone()),
         lance: Arc::clone(&project.lance),
         embedder: Arc::clone(&state.embedder),
-        reranker: Arc::clone(&state.reranker),
         root_path: Arc::new(project.path.clone()),
         cache: Arc::clone(&project.cache),
         embedding_circuit: Arc::clone(&state.embedding_circuit), // Feature 016
@@ -904,7 +934,6 @@ async fn handle_prompts_get(
         sqlite: Arc::new(project.sqlite.clone()),
         lance: Arc::clone(&project.lance),
         embedder: Arc::clone(&state.embedder),
-        reranker: Arc::clone(&state.reranker),
         root_path: Arc::new(project.path.clone()),
         cache: Arc::clone(&project.cache),
         embedding_circuit: Arc::clone(&state.embedding_circuit), // Feature 016

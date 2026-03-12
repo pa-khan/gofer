@@ -211,6 +211,7 @@ impl EmbedderPool {
             });
 
         let model = match config.model.as_str() {
+            "NomicEmbedTextV15" | "nomic-embed-text-v1.5" => EmbeddingModel::NomicEmbedTextV15,
             "BGESmallENV15" | "bge-small-en-v1.5" => EmbeddingModel::BGESmallENV15,
             "BGEBaseENV15" | "bge-base-en-v1.5" => EmbeddingModel::BGEBaseENV15,
             "AllMiniLML6V2" | "all-MiniLM-L6-v2" => EmbeddingModel::AllMiniLML6V2,
@@ -228,7 +229,7 @@ impl EmbedderPool {
             768
         } else {
             match &model {
-                EmbeddingModel::BGEBaseENV15 => 768,
+                EmbeddingModel::BGEBaseENV15 | EmbeddingModel::NomicEmbedTextV15 => 768,
                 _ => 384, // BGESmallENV15, AllMiniLML6V2
             }
         };
@@ -237,10 +238,18 @@ impl EmbedderPool {
 
         if use_quantized {
             // Load custom quantized model
-            let onnx_path = PathBuf::from(config.quantized_model_path.as_ref().unwrap());
-            let tokenizer_path = PathBuf::from(config.tokenizer_path.as_ref().unwrap());
+            let onnx_path =
+                PathBuf::from(config.quantized_model_path.as_ref().ok_or_else(|| {
+                    EmbedderError::Embedding(anyhow::anyhow!("Missing quantized_model_path"))
+                })?);
+            let tokenizer_path =
+                PathBuf::from(config.tokenizer_path.as_ref().ok_or_else(|| {
+                    EmbedderError::Embedding(anyhow::anyhow!("Missing tokenizer_path"))
+                })?);
             let tokenizer_config_path =
-                PathBuf::from(config.tokenizer_config_path.as_ref().unwrap());
+                PathBuf::from(config.tokenizer_config_path.as_ref().ok_or_else(|| {
+                    EmbedderError::Embedding(anyhow::anyhow!("Missing tokenizer_config_path"))
+                })?);
 
             for i in 0..size {
                 let embedder = Embedder::with_quantized_model(

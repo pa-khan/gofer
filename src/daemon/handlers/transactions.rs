@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Atomic Transactions - Phase 2 implementation
 //!
 //! Implements:

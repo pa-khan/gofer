@@ -118,7 +118,13 @@ impl LanguageService for GoService {
         ]
     }
 
-    async fn call_tool(&self, name: &str, args: Value, root: &Path) -> Result<String> {
+    async fn call_tool(
+        &self,
+        name: &str,
+        args: Value,
+        ctx: &crate::daemon::tools::ToolContext,
+    ) -> Result<String> {
+        let root = ctx.root_path.as_path();
         match name {
             "go_project_info" => self.tool_project_info(root).await,
             "go_explain_struct" => self.tool_explain_struct(args).await,

@@ -74,49 +74,44 @@ pub async fn dispatch(name: &str, args: Value, ctx: &ToolContext) -> Result<Valu
         "restore" => trash::tool_restore(args, ctx).await,
         "purge_trash" => trash::tool_purge_trash(args, ctx).await,
         // Atomic Transactions (Phase 2)
-        "begin_transaction" => transactions::tool_begin_transaction(args, ctx).await,
-        "add_operation" => transactions::tool_add_operation(args, ctx).await,
-        "commit_transaction" => transactions::tool_commit_transaction(args, ctx).await,
-        "rollback_transaction" => transactions::tool_rollback_transaction(args, ctx).await,
-        "list_transactions" => transactions::tool_list_transactions(args, ctx).await,
         // Code Quality Tools (Phase 2)
         "format_file" => code_quality::tool_format_file(args, ctx).await,
         "lint_file" => code_quality::tool_lint_file(args, ctx).await,
         "apply_lint_fix" => code_quality::tool_apply_lint_fix(args, ctx).await,
         // CAS Buffer (Phase 3) - content-addressable storage
-        "extract_to_hash" => cas_buffer::tool_extract_to_hash(args, ctx).await,
-        "insert_hash" => cas_buffer::tool_insert_hash(args, ctx).await,
-        "replace_with_hash" => cas_buffer::tool_replace_with_hash(args, ctx).await,
-        "content_to_hash" => cas_buffer::tool_content_to_hash(args, ctx).await,
-        "list_buffers" => cas_buffer::tool_list_buffers(args, ctx).await,
-        "clear_buffer" => cas_buffer::tool_clear_buffer(args, ctx).await,
+        "clipboard_copy" => cas_buffer::tool_extract_to_clipboard(args, ctx).await,
+        "clipboard_paste" => cas_buffer::tool_insert_clipboard(args, ctx).await,
+        "clipboard_replace" => cas_buffer::tool_replace_with_clipboard(args, ctx).await,
+        "clipboard_store_text" => cas_buffer::tool_content_to_clipboard(args, ctx).await,
+        "clipboard_list" => cas_buffer::tool_list_clipboards(args, ctx).await,
+        "clipboard_clear" => cas_buffer::tool_clear_clipboard(args, ctx).await,
         // Execution Sandbox (Phase 3) - AI can test its own code
         "execute_code" => sandbox::tool_execute_code(args, ctx).await,
         "execute_function" => sandbox::tool_execute_function(args, ctx).await,
-        // "run_test" => sandbox::tool_run_test(args, ctx).await,
-        // "run_all_tests" => sandbox::tool_run_all_tests(args, ctx).await,
+        "run_test" => sandbox::tool_run_test(args, ctx).await,
+        "run_all_tests" => sandbox::tool_run_all_tests(args, ctx).await,
         // rust-analyzer tools
-        // "rust_goto_definition" => rust_analyzer::tool_rust_goto_definition(args, ctx).await,
-        // "rust_find_references" => rust_analyzer::tool_rust_find_references(args, ctx).await,
-        // "rust_hover" => rust_analyzer::tool_rust_hover(args, ctx).await,
-        // "rust_diagnostics" => rust_analyzer::tool_rust_diagnostics(args, ctx).await,
-        // "rust_completions" => rust_analyzer::tool_rust_completions(args, ctx).await,
-        // "rust_inlay_hints" => rust_analyzer::tool_rust_inlay_hints(args, ctx).await,
-        // "rust_code_actions" => rust_analyzer::tool_rust_code_actions(args, ctx).await,
+        "rust_goto_definition" => rust_analyzer::tool_rust_goto_definition(args, ctx).await,
+        "rust_find_references" => rust_analyzer::tool_rust_find_references(args, ctx).await,
+        "rust_hover" => rust_analyzer::tool_rust_hover(args, ctx).await,
+        "rust_diagnostics" => rust_analyzer::tool_rust_diagnostics(args, ctx).await,
+        "rust_completions" => rust_analyzer::tool_rust_completions(args, ctx).await,
+        "rust_inlay_hints" => rust_analyzer::tool_rust_inlay_hints(args, ctx).await,
+        "rust_code_actions" => rust_analyzer::tool_rust_code_actions(args, ctx).await,
         // rust-analyzer extended (architecture navigation)
-        // "rust_document_symbols" => {
-        //     rust_analyzer_extended::tool_rust_document_symbols(args, ctx).await
-        // }
-        // "rust_workspace_symbols" => {
-        //     rust_analyzer_extended::tool_rust_workspace_symbols(args, ctx).await
-        // }
-        // "rust_goto_implementation" => {
-        //     rust_analyzer_extended::tool_rust_goto_implementation(args, ctx).await
-        // }
-        // "rust_rename" => rust_analyzer_extended::tool_rust_rename(args, ctx).await,
-        // "rust_expand_macro" => rust_analyzer_extended::tool_rust_expand_macro(args, ctx).await,
-        // "rust_incoming_calls" => rust_analyzer_extended::tool_rust_incoming_calls(args, ctx).await,
-        // "rust_outgoing_calls" => rust_analyzer_extended::tool_rust_outgoing_calls(args, ctx).await,
+        "rust_document_symbols" => {
+            rust_analyzer_extended::tool_rust_document_symbols(args, ctx).await
+        }
+        "rust_workspace_symbols" => {
+            rust_analyzer_extended::tool_rust_workspace_symbols(args, ctx).await
+        }
+        "rust_goto_implementation" => {
+            rust_analyzer_extended::tool_rust_goto_implementation(args, ctx).await
+        }
+        "rust_rename" => rust_analyzer_extended::tool_rust_rename(args, ctx).await,
+        "rust_expand_macro" => rust_analyzer_extended::tool_rust_expand_macro(args, ctx).await,
+        "rust_incoming_calls" => rust_analyzer_extended::tool_rust_incoming_calls(args, ctx).await,
+        "rust_outgoing_calls" => rust_analyzer_extended::tool_rust_outgoing_calls(args, ctx).await,
         // Language tools folding (meta-tools)
         "lang_tools_list" => lang_tools::tool_lang_tools_list(args, ctx).await,
         "lang_tools_call" => lang_tools::tool_lang_tools_call(args, ctx).await,
@@ -147,7 +142,7 @@ pub fn core_tools_list() -> Vec<Value> {
         }),
         json!({
             "name": "get_symbols",
-            "description": "List all symbols (functions, structs, classes) in a file or the entire project. Supports pagination via offset/limit.",
+            "description": "List all symbols (functions, structs, classes) in a file or the entire project. Supports pagination via offset/limit. Returns a token-optimized map clustered by file path.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -160,7 +155,7 @@ pub fn core_tools_list() -> Vec<Value> {
         }),
         json!({
             "name": "get_references",
-            "description": "Find all references to a symbol (where it's used in the codebase).",
+            "description": "Find all references to a symbol (where it's used in the codebase). Returns a token-optimized flat string array.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -171,7 +166,7 @@ pub fn core_tools_list() -> Vec<Value> {
         }),
         json!({
             "name": "get_dependencies",
-            "description": "List project dependencies from Cargo.toml/package.json with versions.",
+            "description": "List project dependencies from Cargo.toml/package.json with versions. Returns a token-optimized flat string array.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -181,7 +176,7 @@ pub fn core_tools_list() -> Vec<Value> {
         }),
         json!({
             "name": "dependency_impact",
-            "description": "Show all files that use a specific dependency.",
+            "description": "Show all files that use a specific dependency. Returns a token-optimized flat string array.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -192,7 +187,7 @@ pub fn core_tools_list() -> Vec<Value> {
         }),
         json!({
             "name": "get_errors",
-            "description": "Get current compiler errors/warnings from cargo check or tsc. Supports pagination via offset/limit.",
+            "description": "Get current compiler errors/warnings from cargo check or tsc. Supports pagination via offset/limit. Returns a token-optimized map clustered by file.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -207,22 +202,6 @@ pub fn core_tools_list() -> Vec<Value> {
             "name": "run_diagnostics",
             "description": "Run cargo check and/or tsc to refresh compiler diagnostics.",
             "inputSchema": { "type": "object", "properties": {} }
-        }),
-        json!({
-            "name": "get_config_keys",
-            "description": "List all configuration keys from .env.example files.",
-            "inputSchema": { "type": "object", "properties": {} }
-        }),
-        json!({
-            "name": "get_vue_tree",
-            "description": "Get the DOM tree structure of a Vue component.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "file": { "type": "string", "description": "Path to Vue file" }
-                },
-                "required": ["file"]
-            }
         }),
         json!({
             "name": "git_blame",
@@ -273,11 +252,6 @@ pub fn core_tools_list() -> Vec<Value> {
                 },
                 "required": ["query"]
             }
-        }),
-        json!({
-            "name": "domain_stats",
-            "description": "Get statistics about code distribution across domains (backend/frontend/shared).",
-            "inputSchema": { "type": "object", "properties": {} }
         }),
         json!({
             "name": "get_api_routes",
@@ -363,7 +337,7 @@ pub fn core_tools_list() -> Vec<Value> {
         }),
         json!({
             "name": "project_tree",
-            "description": "Show directory tree of the project. Respects .gitignore and skips common noise directories (node_modules, target, .git, etc.).",
+            "description": "Show directory tree of the project. Respects .gitignore and skips common noise directories (node_modules, target, .git, etc.). Returns a token-optimized flat string array.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -375,7 +349,7 @@ pub fn core_tools_list() -> Vec<Value> {
         }),
         json!({
             "name": "search_symbols",
-            "description": "Search symbols (functions, structs, classes) by name pattern. Supports substring matching.",
+            "description": "Search symbols (functions, structs, classes) by name pattern. Supports substring matching. Returns a token-optimized map clustered by file.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -387,39 +361,13 @@ pub fn core_tools_list() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "add_rule",
-            "description": "Add a project rule/best practice. Rules are injected into LLM context to guide code generation.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "category": { "type": "string", "description": "Rule category (e.g. 'naming', 'architecture', 'testing', 'security')" },
-                    "rule": { "type": "string", "description": "The rule text" },
-                    "priority": { "type": "integer", "description": "Priority (higher = more important, default: 0)", "default": 0 }
-                },
-                "required": ["category", "rule"]
-            }
-        }),
-        json!({
-            "name": "mark_golden_sample",
-            "description": "Mark a file as a 'golden sample' — a reference example of how code should be written in this project.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "file": { "type": "string", "description": "File path to mark as golden sample" },
-                    "category": { "type": "string", "description": "Category (e.g. 'component', 'api-handler', 'test')" },
-                    "description": { "type": "string", "description": "Why this file is a good example" }
-                },
-                "required": ["file"]
-            }
-        }),
-        json!({
             "name": "run_check",
             "description": "Run compiler/linter checks (cargo check, tsc) and return fresh diagnostics without modifying any files.",
             "inputSchema": { "type": "object", "properties": {} }
         }),
         json!({
             "name": "grep",
-            "description": "Search file contents using regex patterns. Returns matching lines with file paths and line numbers.",
+            "description": "Search file contents using regex patterns. Returns a token-optimized map of matching lines clustered by file path.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -457,7 +405,7 @@ pub fn core_tools_list() -> Vec<Value> {
         }),
         json!({
             "name": "get_callers",
-            "description": "Find all symbols that call/reference a given symbol (incoming references).",
+            "description": "Find all symbols that call/reference a given symbol (incoming references). Returns a token-optimized flat string array.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -468,7 +416,7 @@ pub fn core_tools_list() -> Vec<Value> {
         }),
         json!({
             "name": "get_callees",
-            "description": "Find all symbols called/referenced by a given symbol (outgoing references).",
+            "description": "Find all symbols called/referenced by a given symbol (outgoing references). Returns a token-optimized flat string array.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -486,12 +434,7 @@ pub fn core_tools_list() -> Vec<Value> {
         // Phase 0: Index Quality & Visibility
         json!({
             "name": "get_index_status",
-            "description": "Get current index status with completeness metrics, file counts, and last sync information. Use this to understand what's indexed and if indexing is complete.",
-            "inputSchema": { "type": "object", "properties": {} }
-        }),
-        json!({
-            "name": "validate_index",
-            "description": "Validate index integrity and find issues like orphaned symbols, missing embeddings, or failed files. Returns list of issues with recommendations.",
+            "description": "Get current index status with completeness metrics, file counts, and last sync information. Returns token-optimized status summaries.",
             "inputSchema": { "type": "object", "properties": {} }
         }),
         json!({
@@ -515,64 +458,6 @@ pub fn core_tools_list() -> Vec<Value> {
         }),
         // Phase 0: Lightweight Checks (Token Efficient)
         json!({
-            "name": "file_exists",
-            "description": "Lightweight check if file exists in index without reading content. 95% token savings vs reading full file.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "file": { "type": "string", "description": "File path to check" }
-                },
-                "required": ["file"]
-            }
-        }),
-        json!({
-            "name": "symbol_exists",
-            "description": "Lightweight check if symbol exists in codebase without reading content. Optionally filter by file.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "symbol": { "type": "string", "description": "Symbol name to check" },
-                    "file": { "type": "string", "description": "Optional file path to narrow search" }
-                },
-                "required": ["symbol"]
-            }
-        }),
-        json!({
-            "name": "has_tests_for",
-            "description": "Check if tests exist for a given file. Recognizes common test patterns across languages (*.test.ts, *_test.rs, test_*.py, etc).",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "file": { "type": "string", "description": "Source file path to check for tests" }
-                },
-                "required": ["file"]
-            }
-        }),
-        json!({
-            "name": "is_exported",
-            "description": "Check if a symbol is exported/public. Fast visibility check without reading full file.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "symbol": { "type": "string", "description": "Symbol name to check" },
-                    "file": { "type": "string", "description": "Optional file path to narrow search" }
-                },
-                "required": ["symbol"]
-            }
-        }),
-        json!({
-            "name": "has_documentation",
-            "description": "Check if a symbol has documentation comments. Looks for doc comments in index.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "symbol": { "type": "string", "description": "Symbol name to check" },
-                    "file": { "type": "string", "description": "Optional file path to narrow search" }
-                },
-                "required": ["symbol"]
-            }
-        }),
-        json!({
             "name": "suggest_commit",
             "description": "Generate intelligent commit message based on git changes. Analyzes diff and suggests Conventional Commits format with safety checks.",
             "inputSchema": {
@@ -595,14 +480,6 @@ pub fn core_tools_list() -> Vec<Value> {
                         "description": "Maximum subject line length"
                     }
                 }
-            }
-        }),
-        json!({
-            "name": "get_cache_stats",
-            "description": "Get cache statistics (hit rates, sizes, evictions). Part of Feature 008: server_side_cache for monitoring cache performance.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {}
             }
         }),
         json!({
@@ -728,7 +605,7 @@ pub fn core_tools_list() -> Vec<Value> {
         // Phase 1: File Operations
         json!({
             "name": "list_directory",
-            "description": "List directory contents with recursive support. Returns file tree structure with metadata. Supports exclude patterns for node_modules, target, etc.",
+            "description": "List directory contents with recursive support. Returns a token-optimized flat string array of paths and sizes. Supports exclude patterns for node_modules, target, etc.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -881,7 +758,7 @@ pub fn core_tools_list() -> Vec<Value> {
         }),
         json!({
             "name": "search_files",
-            "description": "Regex-based full-text search across files. Similar to grep but with optional context lines. Complements semantic search for literal string/pattern matching.",
+            "description": "Regex-based full-text search across files. Returns a token-optimized map of matching strings clustered by file. Similar to grep but with optional context lines.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -980,85 +857,6 @@ pub fn core_tools_list() -> Vec<Value> {
             }
         }),
         // Atomic Transactions (Phase 2) - safe multi-file operations
-        json!({
-            "name": "begin_transaction",
-            "description": "Begin atomic transaction. All operations are buffered until commit. Use for multi-file refactorings where all-or-nothing guarantee is critical.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "transaction_id": {
-                        "type": "string",
-                        "description": "Transaction ID (optional, auto-generated if omitted)"
-                    }
-                }
-            }
-        }),
-        json!({
-            "name": "add_operation",
-            "description": "Add operation to active transaction. Validates but doesn't apply until commit.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "transaction_id": {
-                        "type": "string",
-                        "description": "Transaction ID from begin_transaction"
-                    },
-                    "operation": {
-                        "type": "object",
-                        "description": "Operation to add",
-                        "properties": {
-                            "type": {
-                                "type": "string",
-                                "enum": ["patch_file", "write_file", "append_to_file", "delete_safe", "move_file", "create_directory"],
-                                "description": "Operation type"
-                            },
-                            "params": {
-                                "type": "object",
-                                "description": "Parameters for the operation (same as individual tools)"
-                            }
-                        },
-                        "required": ["type", "params"]
-                    }
-                },
-                "required": ["transaction_id", "operation"]
-            }
-        }),
-        json!({
-            "name": "commit_transaction",
-            "description": "Atomically apply ALL operations in transaction. Creates snapshot before applying. On any error, automatically rolls back all changes.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "transaction_id": {
-                        "type": "string",
-                        "description": "Transaction ID to commit"
-                    }
-                },
-                "required": ["transaction_id"]
-            }
-        }),
-        json!({
-            "name": "rollback_transaction",
-            "description": "Discard all operations in transaction without applying. Use when you realize the approach is wrong.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "transaction_id": {
-                        "type": "string",
-                        "description": "Transaction ID to rollback"
-                    }
-                },
-                "required": ["transaction_id"]
-            }
-        }),
-        json!({
-            "name": "list_transactions",
-            "description": "Show all active transactions with their status and operation count.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {}
-            }
-        }),
         // Code Quality Tools (Phase 2) - formatters and linters
         json!({
             "name": "format_file",
@@ -1081,7 +879,7 @@ pub fn core_tools_list() -> Vec<Value> {
         }),
         json!({
             "name": "lint_file",
-            "description": "Run linter on file (clippy, eslint, ruff, golangci-lint). Returns warnings with line numbers, severity, and auto-fix availability.",
+            "description": "Run linter on file (clippy, eslint, ruff, golangci-lint). Returns token-optimized flat string array of warnings with line numbers, severity, and auto-fix availability.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1109,7 +907,7 @@ pub fn core_tools_list() -> Vec<Value> {
         }),
         // CAS Buffer (Phase 3) - revolutionary token optimization
         json!({
-            "name": "extract_to_hash",
+            "name": "clipboard_copy",
             "description": "Extract code block to content-addressable hash. Returns short hash ID instead of full content. Saves 70-90% tokens. Optionally cut (remove) from source file.",
             "inputSchema": {
                 "type": "object",
@@ -1136,7 +934,7 @@ pub fn core_tools_list() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "insert_hash",
+            "name": "clipboard_paste",
             "description": "Insert code from hash at specified line. No need to regenerate code - server expands hash to original content. Zero risk of hallucinations.",
             "inputSchema": {
                 "type": "object",
@@ -1158,7 +956,7 @@ pub fn core_tools_list() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "replace_with_hash",
+            "name": "clipboard_replace",
             "description": "Replace code block with content from hash. Precise replacement without regenerating code.",
             "inputSchema": {
                 "type": "object",
@@ -1184,7 +982,7 @@ pub fn core_tools_list() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "content_to_hash",
+            "name": "clipboard_store_text",
             "description": "Create hash from arbitrary content. Useful when AI generates code and wants to store it as hash for later reuse.",
             "inputSchema": {
                 "type": "object",
@@ -1198,7 +996,7 @@ pub fn core_tools_list() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "list_buffers",
+            "name": "clipboard_list",
             "description": "Show all active hashes in memory with metadata (size, age, access count, TTL). Use to see what's available.",
             "inputSchema": {
                 "type": "object",
@@ -1206,7 +1004,7 @@ pub fn core_tools_list() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "clear_buffer",
+            "name": "clipboard_clear",
             "description": "Remove hash from memory. Optionally specify hash_id to clear specific buffer, or omit to clear all buffers.",
             "inputSchema": {
                 "type": "object",
@@ -1312,301 +1110,301 @@ pub fn core_tools_list() -> Vec<Value> {
                 }
             }
         }),
-        // rust-analyzer tools
-        // json!({
-        //     "name": "rust_goto_definition",
-        //     "description": "Go to definition for a Rust symbol at the specified position using rust-analyzer. Returns precise location(s) of where the symbol is defined.",
-        //     "inputSchema": {
-        //         "type": "object",
-        //         "properties": {
-        //             "file_path": {
-        //                 "type": "string",
-        //                 "description": "Path to Rust file (relative or absolute)"
-        //             },
-        //             "line": {
-        //                 "type": "integer",
-        //                 "description": "Line number (0-indexed)"
-        //             },
-        //             "character": {
-        //                 "type": "integer",
-        //                 "description": "Character position in line (0-indexed)"
-        //             }
-        //         },
-        //         "required": ["file_path", "line", "character"]
-        //     }
-        // }),
-        // json!({
-        //     "name": "rust_find_references",
-        //     "description": "Find all references to a Rust symbol at the specified position using rust-analyzer. Shows where the symbol is used across the codebase.",
-        //     "inputSchema": {
-        //         "type": "object",
-        //         "properties": {
-        //             "file_path": {
-        //                 "type": "string",
-        //                 "description": "Path to Rust file (relative or absolute)"
-        //             },
-        //             "line": {
-        //                 "type": "integer",
-        //                 "description": "Line number (0-indexed)"
-        //             },
-        //             "character": {
-        //                 "type": "integer",
-        //                 "description": "Character position in line (0-indexed)"
-        //             },
-        //             "include_declaration": {
-        //                 "type": "boolean",
-        //                 "default": true,
-        //                 "description": "Include the symbol declaration in results"
-        //             }
-        //         },
-        //         "required": ["file_path", "line", "character"]
-        //     }
-        // }),
-        // json!({
-        //     "name": "rust_hover",
-        //     "description": "Get hover information (type signature, documentation) for a Rust symbol at the specified position using rust-analyzer.",
-        //     "inputSchema": {
-        //         "type": "object",
-        //         "properties": {
-        //             "file_path": {
-        //                 "type": "string",
-        //                 "description": "Path to Rust file (relative or absolute)"
-        //             },
-        //             "line": {
-        //                 "type": "integer",
-        //                 "description": "Line number (0-indexed)"
-        //             },
-        //             "character": {
-        //                 "type": "integer",
-        //                 "description": "Character position in line (0-indexed)"
-        //             }
-        //         },
-        //         "required": ["file_path", "line", "character"]
-        //     }
-        // }),
-        // json!({
-        //     "name": "rust_diagnostics",
-        //     "description": "Get compiler diagnostics (errors, warnings, hints) for a Rust file from rust-analyzer. Real-time error checking without running cargo.",
-        //     "inputSchema": {
-        //         "type": "object",
-        //         "properties": {
-        //             "file_path": {
-        //                 "type": "string",
-        //                 "description": "Path to Rust file (relative or absolute)"
-        //             }
-        //         },
-        //         "required": ["file_path"]
-        //     }
-        // }),
-        // json!({
-        //     "name": "rust_completions",
-        //     "description": "Get code completion suggestions for Rust at the specified position using rust-analyzer. Provides context-aware completions.",
-        //     "inputSchema": {
-        //         "type": "object",
-        //         "properties": {
-        //             "file_path": {
-        //                 "type": "string",
-        //                 "description": "Path to Rust file (relative or absolute)"
-        //             },
-        //             "line": {
-        //                 "type": "integer",
-        //                 "description": "Line number (0-indexed)"
-        //             },
-        //             "character": {
-        //                 "type": "integer",
-        //                 "description": "Character position in line (0-indexed)"
-        //             }
-        //         },
-        //         "required": ["file_path", "line", "character"]
-        //     }
-        // }),
-        // json!({
-        //     "name": "rust_inlay_hints",
-        //     "description": "Get inlay hints (type annotations, parameter names) for a Rust file range using rust-analyzer. Shows implicit information inline.",
-        //     "inputSchema": {
-        //         "type": "object",
-        //         "properties": {
-        //             "file_path": {
-        //                 "type": "string",
-        //                 "description": "Path to Rust file (relative or absolute)"
-        //             },
-        //             "start_line": {
-        //                 "type": "integer",
-        //                 "description": "Start line number (0-indexed)"
-        //             },
-        //             "end_line": {
-        //                 "type": "integer",
-        //                 "description": "End line number (0-indexed)"
-        //             }
-        //         },
-        //         "required": ["file_path", "start_line", "end_line"]
-        //     }
-        // }),
-        // json!({
-        //     "name": "rust_code_actions",
-        //     "description": "Get available code actions (quick fixes, refactorings) for a Rust file range using rust-analyzer. Suggests automated fixes and improvements.",
-        //     "inputSchema": {
-        //         "type": "object",
-        //         "properties": {
-        //             "file_path": {
-        //                 "type": "string",
-        //                 "description": "Path to Rust file (relative or absolute)"
-        //             },
-        //             "start_line": {
-        //                 "type": "integer",
-        //                 "description": "Start line number (0-indexed)"
-        //             },
-        //             "end_line": {
-        //                 "type": "integer",
-        //                 "description": "End line number (0-indexed)"
-        //             }
-        //         },
-        //         "required": ["file_path", "start_line", "end_line"]
-        //     }
-        // }),
-        // rust-analyzer extended tools
-        // json!({
-        //     "name": "rust_document_symbols",
-        //     "description": "Get document outline (structures, functions, enums, traits, impl blocks) for a Rust file. Returns hierarchical symbol tree for quick navigation without reading entire file.",
-        //     "inputSchema": {
-        //         "type": "object",
-        //         "properties": {
-        //             "file_path": {
-        //                 "type": "string",
-        //                 "description": "Path to Rust file (relative or absolute)"
-        //             }
-        //         },
-        //         "required": ["file_path"]
-        //     }
-        // }),
-        // json!({
-        //     "name": "rust_workspace_symbols",
-        //     "description": "Search for symbols (structs, functions, traits, etc.) across the entire workspace by name. Like Ctrl+T in IDEs - finds definitions without knowing file location.",
-        //     "inputSchema": {
-        //         "type": "object",
-        //         "properties": {
-        //             "query": {
-        //                 "type": "string",
-        //                 "description": "Symbol name or pattern to search for (e.g., 'User', 'handle_', 'Config')"
-        //             }
-        //         },
-        //         "required": ["query"]
-        //     }
-        // }),
-        // json!({
-        //     "name": "rust_goto_implementation",
-        //     "description": "Go to concrete implementation(s) of a trait method or type. Critical for Rust - shows actual code that executes, not just trait definition.",
-        //     "inputSchema": {
-        //         "type": "object",
-        //         "properties": {
-        //             "file_path": {
-        //                 "type": "string",
-        //                 "description": "Path to Rust file (relative or absolute)"
-        //             },
-        //             "line": {
-        //                 "type": "integer",
-        //                 "description": "Line number (0-indexed)"
-        //             },
-        //             "character": {
-        //                 "type": "integer",
-        //                 "description": "Character position in line (0-indexed)"
-        //             }
-        //         },
-        //         "required": ["file_path", "line", "character"]
-        //     }
-        // }),
-        // json!({
-        //     "name": "rust_rename",
-        //     "description": "Rename a symbol semantically across the entire workspace. Safe refactoring that updates all references, handles shadowing correctly. Returns workspace edit with all affected files.",
-        //     "inputSchema": {
-        //         "type": "object",
-        //         "properties": {
-        //             "file_path": {
-        //                 "type": "string",
-        //                 "description": "Path to Rust file (relative or absolute)"
-        //             },
-        //             "line": {
-        //                 "type": "integer",
-        //                 "description": "Line number (0-indexed)"
-        //             },
-        //             "character": {
-        //                 "type": "integer",
-        //                 "description": "Character position in line (0-indexed)"
-        //             },
-        //             "new_name": {
-        //                 "type": "string",
-        //                 "description": "New name for the symbol"
-        //             }
-        //         },
-        //         "required": ["file_path", "line", "character", "new_name"]
-        //     }
-        // }),
-        // json!({
-        //     "name": "rust_expand_macro",
-        //     "description": "Expand Rust macro at position to see generated code. CRITICAL for understanding derive macros (Serialize, Debug), procedural macros (sqlx::query!, tokio::main), and declarative macros.",
-        //     "inputSchema": {
-        //         "type": "object",
-        //         "properties": {
-        //             "file_path": {
-        //                 "type": "string",
-        //                 "description": "Path to Rust file (relative or absolute)"
-        //             },
-        //             "line": {
-        //                 "type": "integer",
-        //                 "description": "Line number where macro is invoked (0-indexed)"
-        //             },
-        //             "character": {
-        //                 "type": "integer",
-        //                 "description": "Character position in line (0-indexed)"
-        //             }
-        //         },
-        //         "required": ["file_path", "line", "character"]
-        //     }
-        // }),
-        // json!({
-        //     "name": "rust_incoming_calls",
-        //     "description": "Get incoming calls (callers) for a function/method. Shows who calls this function - useful for impact analysis when refactoring.",
-        //     "inputSchema": {
-        //         "type": "object",
-        //         "properties": {
-        //             "file_path": {
-        //                 "type": "string",
-        //                 "description": "Path to Rust file (relative or absolute)"
-        //             },
-        //             "line": {
-        //                 "type": "integer",
-        //                 "description": "Line number of function/method (0-indexed)"
-        //             },
-        //             "character": {
-        //                 "type": "integer",
-        //                 "description": "Character position in line (0-indexed)"
-        //             }
-        //         },
-        //         "required": ["file_path", "line", "character"]
-        //     }
-        // }),
-        // json!({
-        //     "name": "rust_outgoing_calls",
-        //     "description": "Get outgoing calls (callees) for a function/method. Shows what this function calls - useful for understanding dependencies and control flow.",
-        //     "inputSchema": {
-        //         "type": "object",
-        //         "properties": {
-        //             "file_path": {
-        //                 "type": "string",
-        //                 "description": "Path to Rust file (relative or absolute)"
-        //             },
-        //             "line": {
-        //                 "type": "integer",
-        //                 "description": "Line number of function/method (0-indexed)"
-        //             },
-        //             "character": {
-        //                 "type": "integer",
-        //                 "description": "Character position in line (0-indexed)"
-        //             }
-        //         },
-        //         "required": ["file_path", "line", "character"]
-        //     }
-        // }),
+        //rust-analyzer tools
+        json!({
+            "name": "rust_goto_definition",
+            "description": "Go to definition for a Rust symbol at the specified position using rust-analyzer. Returns precise location(s) of where the symbol is defined.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to Rust file (relative or absolute)"
+                    },
+                    "line": {
+                        "type": "integer",
+                        "description": "Line number (0-indexed)"
+                    },
+                    "character": {
+                        "type": "integer",
+                        "description": "Character position in line (0-indexed)"
+                    }
+                },
+                "required": ["file_path", "line", "character"]
+            }
+        }),
+        json!({
+            "name": "rust_find_references",
+            "description": "Find all references to a Rust symbol at the specified position using rust-analyzer. Shows where the symbol is used across the codebase.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to Rust file (relative or absolute)"
+                    },
+                    "line": {
+                        "type": "integer",
+                        "description": "Line number (0-indexed)"
+                    },
+                    "character": {
+                        "type": "integer",
+                        "description": "Character position in line (0-indexed)"
+                    },
+                    "include_declaration": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Include the symbol declaration in results"
+                    }
+                },
+                "required": ["file_path", "line", "character"]
+            }
+        }),
+        json!({
+            "name": "rust_hover",
+            "description": "Get hover information (type signature, documentation) for a Rust symbol at the specified position using rust-analyzer.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to Rust file (relative or absolute)"
+                    },
+                    "line": {
+                        "type": "integer",
+                        "description": "Line number (0-indexed)"
+                    },
+                    "character": {
+                        "type": "integer",
+                        "description": "Character position in line (0-indexed)"
+                    }
+                },
+                "required": ["file_path", "line", "character"]
+            }
+        }),
+        json!({
+            "name": "rust_diagnostics",
+            "description": "Get compiler diagnostics (errors, warnings) for a Rust file.\nReturns a token-optimized flat string array: ['line:char-end:char [severity] code message (source)'] from rust-analyzer. Real-time error checking without running cargo.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to Rust file (relative or absolute)"
+                    }
+                },
+                "required": ["file_path"]
+            }
+        }),
+        json!({
+            "name": "rust_completions",
+            "description": "Get code completions for Rust at position.\nReturns a token-optimized flat string array: ['label (kind) - detail'] for Rust at the specified position using rust-analyzer. Provides context-aware completions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to Rust file (relative or absolute)"
+                    },
+                    "line": {
+                        "type": "integer",
+                        "description": "Line number (0-indexed)"
+                    },
+                    "character": {
+                        "type": "integer",
+                        "description": "Character position in line (0-indexed)"
+                    }
+                },
+                "required": ["file_path", "line", "character"]
+            }
+        }),
+        json!({
+            "name": "rust_inlay_hints",
+            "description": "Get inlay hints (type annotations, parameter names) for a Rust file range.\nReturns a token-optimized flat string array: ['line:char [kind] label'] using rust-analyzer. Shows implicit information inline.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to Rust file (relative or absolute)"
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "Start line number (0-indexed)"
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "End line number (0-indexed)"
+                    }
+                },
+                "required": ["file_path", "start_line", "end_line"]
+            }
+        }),
+        json!({
+            "name": "rust_code_actions",
+            "description": "Get code actions (quick fixes, refactorings) for a Rust file range.\nReturns a token-optimized flat string array of available actions. using rust-analyzer. Suggests automated fixes and improvements.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to Rust file (relative or absolute)"
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "Start line number (0-indexed)"
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "End line number (0-indexed)"
+                    }
+                },
+                "required": ["file_path", "start_line", "end_line"]
+            }
+        }),
+        //rust-analyzer extended tools
+        json!({
+            "name": "rust_document_symbols",
+            "description": "Get document outline (structures, functions, enums, traits, impl blocks) for a Rust file. Returns hierarchical symbol tree for quick navigation without reading entire file.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to Rust file (relative or absolute)"
+                    }
+                },
+                "required": ["file_path"]
+            }
+        }),
+        json!({
+            "name": "rust_workspace_symbols",
+            "description": "Search for symbols (structs, functions, traits, etc.) across the entire workspace by name. Like Ctrl+T in IDEs - finds definitions without knowing file location.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Symbol name or pattern to search for (e.g., 'User', 'handle_', 'Config')"
+                    }
+                },
+                "required": ["query"]
+            }
+        }),
+        json!({
+            "name": "rust_goto_implementation",
+            "description": "Go to concrete implementation(s) of a trait method or type. Critical for Rust - shows actual code that executes, not just trait definition.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to Rust file (relative or absolute)"
+                    },
+                    "line": {
+                        "type": "integer",
+                        "description": "Line number (0-indexed)"
+                    },
+                    "character": {
+                        "type": "integer",
+                        "description": "Character position in line (0-indexed)"
+                    }
+                },
+                "required": ["file_path", "line", "character"]
+            }
+        }),
+        json!({
+            "name": "rust_rename",
+            "description": "Rename a symbol semantically across the entire workspace. Safe refactoring that updates all references, handles shadowing correctly. Returns workspace edit with all affected files.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to Rust file (relative or absolute)"
+                    },
+                    "line": {
+                        "type": "integer",
+                        "description": "Line number (0-indexed)"
+                    },
+                    "character": {
+                        "type": "integer",
+                        "description": "Character position in line (0-indexed)"
+                    },
+                    "new_name": {
+                        "type": "string",
+                        "description": "New name for the symbol"
+                    }
+                },
+                "required": ["file_path", "line", "character", "new_name"]
+            }
+        }),
+        json!({
+            "name": "rust_expand_macro",
+            "description": "Expand Rust macro at position to see generated code. CRITICAL for understanding derive macros (Serialize, Debug), procedural macros (sqlx::query!, tokio::main), and declarative macros.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to Rust file (relative or absolute)"
+                    },
+                    "line": {
+                        "type": "integer",
+                        "description": "Line number where macro is invoked (0-indexed)"
+                    },
+                    "character": {
+                        "type": "integer",
+                        "description": "Character position in line (0-indexed)"
+                    }
+                },
+                "required": ["file_path", "line", "character"]
+            }
+        }),
+        json!({
+            "name": "rust_incoming_calls",
+            "description": "Get incoming calls (callers) for a function/method. Shows who calls this function - useful for impact analysis when refactoring.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to Rust file (relative or absolute)"
+                    },
+                    "line": {
+                        "type": "integer",
+                        "description": "Line number of function/method (0-indexed)"
+                    },
+                    "character": {
+                        "type": "integer",
+                        "description": "Character position in line (0-indexed)"
+                    }
+                },
+                "required": ["file_path", "line", "character"]
+            }
+        }),
+        json!({
+            "name": "rust_outgoing_calls",
+            "description": "Get outgoing calls (callees) for a function/method. Shows what this function calls - useful for understanding dependencies and control flow.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to Rust file (relative or absolute)"
+                    },
+                    "line": {
+                        "type": "integer",
+                        "description": "Line number of function/method (0-indexed)"
+                    },
+                    "character": {
+                        "type": "integer",
+                        "description": "Character position in line (0-indexed)"
+                    }
+                },
+                "required": ["file_path", "line", "character"]
+            }
+        }),
         json!({
             "name": "lang_tools_list",
             "description": "List all available language-specific tools (Vue, Rust, TypeScript, etc.). Supports filtering by language and semantic search. Returns tool names, descriptions, and optionally full schemas. Use this to discover what language tools are available before calling them.",

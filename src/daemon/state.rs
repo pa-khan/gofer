@@ -15,7 +15,7 @@ use crate::cache::CacheManager;
 use crate::error_recovery::CircuitBreaker; // Feature 016
 use crate::indexer::summarizer::{summary_worker, SummarizerConfig};
 use crate::indexer::{
-    load_config, start_watcher, EmbedderPool, GoferConfig, IndexTask, IndexerService, Reranker,
+    load_config, start_watcher, EmbedderPool, GoferConfig, IndexTask, IndexerService,
 };
 use crate::languages::LanguageService;
 use crate::resource_limits::ResourceLimits; // Feature 015
@@ -29,8 +29,6 @@ pub struct DaemonState {
     pub registry: RegistryDb,
     /// Shared embedding pool (N instances, Arc-shared across all projects)
     pub embedder: Arc<EmbedderPool>,
-    /// Shared reranker (optional, read-only after init)
-    pub reranker: Arc<Option<Reranker>>,
     /// Active projects keyed by project UUID
     pub projects: RwLock<HashMap<String, Arc<ProjectState>>>,
     /// Daemon start time
@@ -254,17 +252,6 @@ impl DaemonState {
         tracing::info!("Loading embedding pool...");
         let embedder = EmbedderPool::with_config(1, &config.embedding)?; // Start with 1 instance, scale up for indexing
 
-        let reranker = match Reranker::new() {
-            Ok(r) => {
-                tracing::info!("Reranker loaded");
-                Some(r)
-            }
-            Err(e) => {
-                tracing::warn!("Reranker not available: {}", e);
-                None
-            }
-        };
-
         let (notify_tx, _) = broadcast::channel::<String>(64);
 
         // Feature 016: Circuit breakers for external services
@@ -286,7 +273,6 @@ impl DaemonState {
             gofer_home,
             registry,
             embedder: Arc::new(embedder),
-            reranker: Arc::new(reranker),
             projects: RwLock::new(HashMap::new()),
             started_at: Instant::now(),
             sync_progress: Arc::new(SyncProgress::new()),
@@ -462,7 +448,12 @@ impl DaemonState {
     }
 
     /// Activate a project: load + full_sync + start watcher.
-    pub async fn activate_project(&self, project_path: &str, watch: bool) -> Result<String> {
+    pub async fn activate_project(
+        &self,
+        project_path: &str,
+        watch: bool,
+        background: bool,
+    ) -> Result<String> {
         let record = self
             .registry
             .get_by_path(project_path)
@@ -496,14 +487,40 @@ impl DaemonState {
         );
 
         let root = PathBuf::from(project_path);
-        sync_indexer
-            .full_sync(
-                &root,
-                &ignore_patterns,
-                Some(self.sync_progress.clone()),
-                Some(self.metrics.clone()),
-            )
-            .await?;
+
+        if background {
+            let progress_clone = self.sync_progress.clone();
+            let metrics_clone = self.metrics.clone();
+            let cancel_clone = project.cancel.clone();
+            let root_clone = root.clone();
+            let ignore_clone = ignore_patterns.clone();
+            let sync_indexer_clone = sync_indexer.clone();
+
+            tokio::spawn(async move {
+                if let Err(e) = sync_indexer_clone
+                    .full_sync(
+                        &root_clone,
+                        &ignore_clone,
+                        Some(progress_clone),
+                        Some(metrics_clone),
+                        cancel_clone,
+                    )
+                    .await
+                {
+                    tracing::error!("Background full sync failed: {}", e);
+                }
+            });
+        } else {
+            sync_indexer
+                .full_sync(
+                    &root,
+                    &ignore_patterns,
+                    Some(self.sync_progress.clone()),
+                    Some(self.metrics.clone()),
+                    project.cancel.clone(),
+                )
+                .await?;
+        }
 
         // Spawn summarizer background worker (if LLM enabled)
         let summarizer_config = SummarizerConfig::from_toml(&config.summarizer);

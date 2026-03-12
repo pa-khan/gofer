@@ -30,33 +30,28 @@ pub async fn tool_rust_document_symbols(args: Value, ctx: &ToolContext) -> Resul
         .document_symbols(std::path::Path::new(&abs_path))
         .await?;
 
+    fn format_symbol(sym: &lsp_types::DocumentSymbol, depth: usize) -> String {
+        let indent = "  ".repeat(depth);
+        let mut result = format!(
+            "{}{} [{:?}] {} (line {})",
+            indent,
+            sym.name,
+            sym.kind,
+            sym.detail.as_deref().unwrap_or(""),
+            sym.range.start.line + 1
+        );
+        if let Some(ref children) = sym.children {
+            for child in children {
+                result.push('\n');
+                result.push_str(&format_symbol(child, depth + 1));
+            }
+        }
+        result
+    }
+
     let results: Vec<_> = symbols
         .into_iter()
-        .map(|sym| {
-            json!({
-                "name": sym.name,
-                "kind": format!("{:?}", sym.kind),
-                "detail": sym.detail,
-                "range": {
-                    "start": { "line": sym.range.start.line, "character": sym.range.start.character },
-                    "end": { "line": sym.range.end.line, "character": sym.range.end.character }
-                },
-                "selection_range": {
-                    "start": { "line": sym.selection_range.start.line, "character": sym.selection_range.start.character },
-                    "end": { "line": sym.selection_range.end.line, "character": sym.selection_range.end.character }
-                },
-                "children": sym.children.map(|children| {
-                    children.into_iter().map(|child| json!({
-                        "name": child.name,
-                        "kind": format!("{:?}", child.kind),
-                        "range": {
-                            "start": { "line": child.range.start.line, "character": child.range.start.character },
-                            "end": { "line": child.range.end.line, "character": child.range.end.character }
-                        }
-                    })).collect::<Vec<_>>()
-                })
-            })
-        })
+        .map(|sym| format_symbol(&sym, 0))
         .collect();
 
     Ok(json!({ "symbols": results }))
@@ -74,25 +69,25 @@ pub async fn tool_rust_workspace_symbols(args: Value, ctx: &ToolContext) -> Resu
 
     let symbols = rust_analyzer.workspace_symbols(query).await?;
 
-    let results: Vec<_> = symbols
-        .into_iter()
-        .map(|sym| {
-            json!({
-                "name": sym.name,
-                "kind": format!("{:?}", sym.kind),
-                "container_name": sym.container_name,
-                "location": {
-                    "file": sym.location.uri.path().as_str(),
-                    "range": {
-                        "start": { "line": sym.location.range.start.line, "character": sym.location.range.start.character },
-                        "end": { "line": sym.location.range.end.line, "character": sym.location.range.end.character }
-                    }
-                }
-            })
-        })
-        .collect();
+    let mut by_file: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for sym in symbols {
+        let file = sym.location.uri.path().to_string();
+        let container = sym
+            .container_name
+            .map(|c| format!(" in {}", c))
+            .unwrap_or_default();
+        let s = format!(
+            "{}: [{:?}] {}{}",
+            sym.location.range.start.line + 1,
+            sym.kind,
+            sym.name,
+            container
+        );
+        by_file.entry(file).or_default().push(s);
+    }
 
-    Ok(json!({ "symbols": results }))
+    Ok(json!({ "symbols": by_file }))
 }
 
 /// Tool: rust_goto_implementation
@@ -129,13 +124,14 @@ pub async fn tool_rust_goto_implementation(args: Value, ctx: &ToolContext) -> Re
     let results: Vec<_> = locations
         .into_iter()
         .map(|loc| {
-            json!({
-                "file": loc.uri.path().as_str(),
-                "line": loc.range.start.line,
-                "character": loc.range.start.character,
-                "end_line": loc.range.end.line,
-                "end_character": loc.range.end.character,
-            })
+            format!(
+                "{}:{}:{}-{}:{}",
+                loc.uri.path(),
+                loc.range.start.line + 1,
+                loc.range.start.character + 1,
+                loc.range.end.line + 1,
+                loc.range.end.character + 1
+            )
         })
         .collect();
 
@@ -312,21 +308,20 @@ pub async fn tool_rust_incoming_calls(args: Value, ctx: &ToolContext) -> Result<
     let results: Vec<_> = incoming
         .into_iter()
         .map(|call| {
-            json!({
-                "from": {
-                    "name": call.from.name,
-                    "kind": format!("{:?}", call.from.kind),
-                    "file": call.from.uri.path().as_str(),
-                    "range": {
-                        "start": { "line": call.from.range.start.line, "character": call.from.range.start.character },
-                        "end": { "line": call.from.range.end.line, "character": call.from.range.end.character }
-                    }
-                },
-                "from_ranges": call.from_ranges.into_iter().map(|r| json!({
-                    "start": { "line": r.start.line, "character": r.start.character },
-                    "end": { "line": r.end.line, "character": r.end.character }
-                })).collect::<Vec<_>>()
-            })
+            let ranges: Vec<String> = call
+                .from_ranges
+                .iter()
+                .map(|r| format!("{}:{}", r.start.line + 1, r.start.character + 1))
+                .collect();
+            format!(
+                "{}:{}:{} [{:?}] {} (from ranges: {})",
+                call.from.uri.path(),
+                call.from.range.start.line + 1,
+                call.from.range.start.character + 1,
+                call.from.kind,
+                call.from.name,
+                ranges.join(", ")
+            )
         })
         .collect();
 
@@ -373,21 +368,20 @@ pub async fn tool_rust_outgoing_calls(args: Value, ctx: &ToolContext) -> Result<
     let results: Vec<_> = outgoing
         .into_iter()
         .map(|call| {
-            json!({
-                "to": {
-                    "name": call.to.name,
-                    "kind": format!("{:?}", call.to.kind),
-                    "file": call.to.uri.path().as_str(),
-                    "range": {
-                        "start": { "line": call.to.range.start.line, "character": call.to.range.start.character },
-                        "end": { "line": call.to.range.end.line, "character": call.to.range.end.character }
-                    }
-                },
-                "from_ranges": call.from_ranges.into_iter().map(|r| json!({
-                    "start": { "line": r.start.line, "character": r.start.character },
-                    "end": { "line": r.end.line, "character": r.end.character }
-                })).collect::<Vec<_>>()
-            })
+            let ranges: Vec<String> = call
+                .from_ranges
+                .iter()
+                .map(|r| format!("{}:{}", r.start.line + 1, r.start.character + 1))
+                .collect();
+            format!(
+                "{}:{}:{} [{:?}] {} (from ranges: {})",
+                call.to.uri.path(),
+                call.to.range.start.line + 1,
+                call.to.range.start.character + 1,
+                call.to.kind,
+                call.to.name,
+                ranges.join(", ")
+            )
         })
         .collect();
 

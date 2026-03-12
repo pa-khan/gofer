@@ -39,7 +39,8 @@ impl DaemonClient {
             "params": params,
         });
 
-        let data = serde_json::to_string(&req)?;
+        let data =
+            simd_json::to_string(&req).map_err(|e| anyhow::anyhow!("simd_json error: {}", e))?;
         self.writer.write_all(data.as_bytes()).await?;
         self.writer.write_all(b"\n").await?;
         self.writer.flush().await?;
@@ -47,7 +48,9 @@ impl DaemonClient {
         let mut line = String::new();
         self.reader.read_line(&mut line).await?;
 
-        let resp: Value = serde_json::from_str(line.trim())?;
+        let mut line_bytes = line.trim().as_bytes().to_vec();
+        let resp: Value = simd_json::from_slice(&mut line_bytes)
+            .map_err(|e| anyhow::anyhow!("simd_json error: {}", e))?;
 
         if let Some(err) = resp.get("error") {
             let msg = err

@@ -55,7 +55,8 @@ pub async fn tool_search_files(args: Value, ctx: &ToolContext) -> Result<Value> 
         );
     }
 
-    let mut matches = Vec::new();
+    let mut file_matches: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
     let mut total_matches = 0;
     let mut files_searched = 0;
 
@@ -119,14 +120,28 @@ pub async fn tool_search_files(args: Value, ctx: &ToolContext) -> Result<Value> 
                         Vec::new()
                     };
 
-                    matches.push(json!({
-                        "file": make_relative_pathbuf(&ctx.root_path, path),
-                        "line": match_line,
-                        "column": line.find(regex_pattern).unwrap_or(0) + 1, // 1-indexed
-                        "match": line.trim(),
-                        "context_before": context_before,
-                        "context_after": context_after,
-                    }));
+                    let rel_path = make_relative_pathbuf(&ctx.root_path, path);
+                    let hit_text = if context_lines > 0 {
+                        let mut ctx_str = String::new();
+                        for (i, c) in context_before.iter().enumerate() {
+                            ctx_str.push_str(&format!(
+                                "  {}: {}\n",
+                                line_num.saturating_sub(context_before.len() - i) + 1,
+                                c
+                            ));
+                        }
+                        ctx_str.push_str(&format!("> {}: {}\n", match_line, line.trim()));
+                        for (i, c) in context_after.iter().enumerate() {
+                            ctx_str.push_str(&format!("  {}: {}\n", match_line + 1 + i, c));
+                        }
+                        ctx_str
+                    } else {
+                        format!("{}: {}", match_line, line.trim())
+                    };
+                    file_matches
+                        .entry(rel_path)
+                        .or_default()
+                        .push(hit_text.trim_end().to_string());
 
                     total_matches += 1;
                     if total_matches >= max_results {
@@ -142,7 +157,7 @@ pub async fn tool_search_files(args: Value, ctx: &ToolContext) -> Result<Value> 
     }
 
     Ok(json!({
-        "matches": matches,
+        "matches": file_matches,
         "total_matches": total_matches,
         "files_searched": files_searched,
         "truncated": total_matches >= max_results,
@@ -222,11 +237,12 @@ pub async fn tool_list_directory(args: Value, ctx: &ToolContext) -> Result<Value
             }
         }
 
-        entries.push(json!({
-            "path": rel_path,
-            "type": if is_dir { "directory" } else { "file" },
-            "size": metadata.as_ref().map(|m| m.len()).unwrap_or(0),
-        }));
+        let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+        if is_dir {
+            entries.push(format!("{}/", rel_path));
+        } else {
+            entries.push(format!("{} ({})", rel_path, format_bytes(size)));
+        }
     }
 
     Ok(json!({

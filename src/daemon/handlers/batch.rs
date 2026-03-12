@@ -58,7 +58,10 @@ pub async fn tool_batch_operations(args: Value, ctx: &ToolContext) -> Result<Val
                 let sem = Arc::clone(&semaphore);
 
                 tokio::spawn(async move {
-                    let _permit = sem.acquire().await.unwrap();
+                    let _permit = match sem.acquire().await {
+                        Ok(p) => p,
+                        Err(e) => return Err(anyhow::anyhow!("Semaphore closed: {}", e)),
+                    };
                     execute_single_operation(idx, op, &ctx).await
                 })
             })

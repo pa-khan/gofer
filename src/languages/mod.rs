@@ -33,5 +33,10 @@ pub trait LanguageService: Send + Sync {
     fn tools(&self) -> Vec<ToolDefinition>;
 
     /// Execute a tool by name
-    async fn call_tool(&self, name: &str, args: Value, root: &Path) -> anyhow::Result<String>;
+    async fn call_tool(
+        &self,
+        name: &str,
+        args: Value,
+        ctx: &crate::daemon::tools::ToolContext,
+    ) -> anyhow::Result<String>;
 }
