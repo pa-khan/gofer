@@ -28,6 +28,15 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
 
+      - name: Use CI-friendly Cargo config
+        run: |
+          if [ -f .cargo/config.toml ]; then
+            mv .cargo/config.toml .cargo/config.local.toml
+          fi
+          if [ -f .cargo/config.ci.toml ]; then
+            cp .cargo/config.ci.toml .cargo/config.toml
+          fi
+
       - name: Get version from release
         id: get_version
         run: |
@@ -104,6 +113,15 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
+
+      - name: Use CI-friendly Cargo config
+        run: |
+          if [ -f .cargo/config.toml ]; then
+            mv .cargo/config.toml .cargo/config.local.toml
+          fi
+          if [ -f .cargo/config.ci.toml ]; then
+            cp .cargo/config.ci.toml .cargo/config.toml
+          fi
 
       - name: Get version from release
         id: get_version
