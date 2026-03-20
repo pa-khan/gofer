@@ -20,46 +20,56 @@ pub async fn tool_project_tree(args: Value, ctx: &ToolContext) -> Result<Value> 
         return Err(GoferError::InvalidParams(format!("Path not found: {}", path)).into());
     }
 
-    let mut tree = Vec::new();
-    let walker = WalkDir::new(&root_path)
-        .max_depth(depth)
-        .sort_by_file_name()
-        .into_iter();
+    let tree = tokio::task::spawn_blocking({
+        let root_path = root_path.clone();
+        let ctx_root_path = ctx.root_path.clone();
+        let pattern_string = pattern.map(|s| s.to_string());
+        
+        move || {
+            let mut tree = Vec::new();
+            let walker = WalkDir::new(&root_path)
+                .max_depth(depth)
+                .sort_by_file_name()
+                .into_iter();
 
-    // Optional glob filter
-    let glob_pat = pattern.and_then(|p| glob::Pattern::new(p).ok());
+            // Optional glob filter
+            let glob_pat = pattern_string.and_then(|p| glob::Pattern::new(&p).ok());
 
-    // We filter entries but need to iterate to get them
-    for e in walker
-        .filter_entry(|e: &DirEntry| {
-            let name = e.file_name().to_string_lossy();
-            // Skip hidden and common ignored dirs
-            !name.starts_with('.')
-                && name != "node_modules"
-                && name != "target"
-                && name != "dist"
-                && name != "build"
-        })
-        .flatten()
-    {
-        let relative = make_relative(&ctx.root_path, e.path().to_str().unwrap_or(""));
-        if relative.is_empty() {
-            continue;
-        } // skip root itself if empty
+            // We filter entries but need to iterate to get them
+            for e in walker
+                .filter_entry(|e: &DirEntry| {
+                    let name = e.file_name().to_string_lossy();
+                    // Skip hidden and common ignored dirs
+                    !name.starts_with('.')
+                        && name != "node_modules"
+                        && name != "target"
+                        && name != "dist"
+                        && name != "build"
+                })
+                .flatten()
+            {
+                let relative = make_relative(&ctx_root_path, e.path().to_str().unwrap_or(""));
+                if relative.is_empty() {
+                    continue;
+                } // skip root itself if empty
 
-        // Apply pattern filter only to files, or inclusion logic
-        if let Some(ref gp) = glob_pat {
-            if e.file_type().is_file() && !gp.matches_path(e.path()) {
-                continue;
+                // Apply pattern filter only to files, or inclusion logic
+                if let Some(ref gp) = glob_pat {
+                    if e.file_type().is_file() && !gp.matches_path(e.path()) {
+                        continue;
+                    }
+                }
+
+                tree.push(if e.file_type().is_dir() {
+                    format!("{}/", relative)
+                } else {
+                    relative
+                });
             }
+            Ok::<_, String>(tree)
         }
-
-        tree.push(if e.file_type().is_dir() {
-            format!("{}/", relative)
-        } else {
-            relative
-        });
-    }
+    }).await.map_err(|e| GoferError::Internal(anyhow::anyhow!("Task panic: {}", e)))?
+      .map_err(|e| GoferError::Internal(anyhow::anyhow!(e)))?;
 
     Ok(json!({
         "root": path,
@@ -143,51 +153,13 @@ pub async fn tool_get_api_routes(args: Value, ctx: &ToolContext) -> Result<Value
     }))
 }
 
-pub async fn tool_get_summary(args: Value, ctx: &ToolContext) -> Result<Value> {
+pub async fn tool_get_summary(args: Value, _ctx: &ToolContext) -> Result<Value> {
     let file = args.get("file").and_then(|v| v.as_str()).unwrap_or("");
-
-    if file.is_empty() {
-        return Err(GoferError::InvalidParams("File path is required".into()).into());
-    }
-
-    match &ctx
-        .sqlite
-        .get_summary_by_path(&resolve_path(&ctx.root_path, file))
-        .await?
-    {
-        Some(summary) => Ok(json!({
-            "file": file,
-            "summary": summary.summary,
-            "source": summary.summary_source
-        })),
-        None => {
-            let file_path = &ctx.root_path.join(file);
-            if !file_path.exists() {
-                return Ok(json!({
-                    "file": file,
-                    "summary": null,
-                    "message": format!("File not found: {}", file)
-                }));
-            }
-
-            let content = tokio::fs::read_to_string(&file_path).await?;
-            let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-
-            if let Some(docstring) = crate::indexer::summarizer::extract_docstring(&content, ext) {
-                Ok(json!({
-                    "file": file,
-                    "summary": docstring,
-                    "source": "docstring"
-                }))
-            } else {
-                Ok(json!({
-                    "file": file,
-                    "summary": null,
-                    "message": "No summary available. The file has not been summarized yet."
-                }))
-            }
-        }
-    }
+    Ok(json!({
+        "file": file,
+        "summary": "Summarizer component has been removed for performance reasons.",
+        "source": "system"
+    }))
 }
 
 pub async fn tool_get_vue_tree(args: Value, ctx: &ToolContext) -> Result<Value> {

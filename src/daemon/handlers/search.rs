@@ -80,8 +80,7 @@ pub async fn tool_search(args: Value, ctx: &ToolContext) -> Result<Value> {
             match ctx
                 .vector_circuit
                 .call(|| async {
-                    let lance = ctx.lance.lock().await;
-                    lance
+                    ctx.lance
                         .search_with_filter(&embedding, limit * 2, path_filter_abs.as_deref())
                         .await
                         .map_err(|e| anyhow::anyhow!(e))
@@ -401,8 +400,7 @@ pub async fn tool_search_by_purpose(args: Value, ctx: &ToolContext) -> Result<Va
     let embedding = ctx.embedder.embed_query(query).await?;
 
     let vector_hits = {
-        let lance = ctx.lance.lock().await;
-        match lance.search(&embedding, limit * 3).await {
+        match ctx.lance.search(&embedding, limit * 3).await {
             Ok(hits) => hits,
             Err(e) => {
                 tracing::error!("Vector search failed: {}", e);
@@ -424,39 +422,6 @@ pub async fn tool_search_by_purpose(args: Value, ctx: &ToolContext) -> Result<Va
             .or_insert(hit.score);
     }
 
-    // 2. Keyword matching on summaries (augments vector results)
-    let summaries = match ctx.sqlite.get_all_summaries().await {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!("Failed to fetch summaries: {}", e);
-            Vec::new()
-        }
-    };
-    let query_lower = query.to_lowercase();
-    let keywords: Vec<&str> = query_lower.split_whitespace().collect();
-
-    let mut summary_map: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
-    for s in &summaries {
-        summary_map.insert(s.file_path.clone(), s.summary.clone());
-
-        // Boost files whose summary matches keywords
-        let summary_lower = s.summary.to_lowercase();
-        let file_lower = s.file_path.to_lowercase();
-        let keyword_hits: usize = keywords
-            .iter()
-            .filter(|kw| summary_lower.contains(*kw) || file_lower.contains(*kw))
-            .count();
-
-        if keyword_hits > 0 {
-            let boost = keyword_hits as f32 * 0.1;
-            file_scores
-                .entry(s.file_path.clone())
-                .and_modify(|s| *s += boost)
-                .or_insert(boost);
-        }
-    }
-
     // 3. Rank and format
     let mut ranked: Vec<(String, f32)> = file_scores.into_iter().collect();
     ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -466,11 +431,7 @@ pub async fn tool_search_by_purpose(args: Value, ctx: &ToolContext) -> Result<Va
         "query": query,
         "total": ranked.len(),
         "files": ranked.iter().map(|(file_path, score)| {
-            let summary = summary_map
-                .get(file_path)
-                .map(|s| s.as_str())
-                .unwrap_or("(no summary)");
-            format!("{} [score={:.4}] - {}", make_relative(&ctx.root_path, file_path), score, summary)
+            format!("{} [score={:.4}]", make_relative(&ctx.root_path, file_path), score)
         }).collect::<Vec<_>>()
     }))
 }
@@ -497,8 +458,7 @@ pub async fn tool_smart_file_selection(args: Value, ctx: &ToolContext) -> Result
     // 1. Vector search for semantic similarity
     let embedding = ctx.embedder.embed_query(query).await?;
     let vector_results = {
-        let lance = ctx.lance.lock().await;
-        lance.search(&embedding, limit * 3).await?
+        ctx.lance.search(&embedding, limit * 3).await?
     };
 
     // 2. Extract unique files from vector results
@@ -528,24 +488,12 @@ pub async fn tool_smart_file_selection(args: Value, ctx: &ToolContext) -> Result
             .await
             .unwrap_or_default();
 
-        // Get file summary if available
-        let summary: Option<crate::models::chunk::FileSummaryWithPath> = ctx
-            .sqlite
-            .get_summary_by_path(&file_path)
-            .await
-            .unwrap_or_default();
-
         // Get file metadata for scoring
         let file_metadata = get_file_metadata(&file_path).await;
 
         // Calculate component scores with v2 algorithm
         let path_score = calculate_path_score_v2(query, &file_path);
         let symbol_score = calculate_symbol_score(query, &symbols);
-        let summary_score = if let Some(ref s) = summary {
-            calculate_summary_score(query, &s.summary)
-        } else {
-            0.0
-        };
 
         // Calculate score with adaptive weights, recency, and size
         let (final_score, scoring_details) = calculate_relevance_score_v2(
@@ -554,7 +502,6 @@ pub async fn tool_smart_file_selection(args: Value, ctx: &ToolContext) -> Result
             vector_score,
             path_score,
             symbol_score,
-            summary_score,
         );
 
         // Generate reasoning
@@ -563,25 +510,14 @@ pub async fn tool_smart_file_selection(args: Value, ctx: &ToolContext) -> Result
         // Extract key symbols
         let key_symbols: Vec<String> = symbols.iter().map(|s| s.name.clone()).take(5).collect();
 
-        let summ_str = summary
-            .map(|s| {
-                if s.summary.len() > 150 {
-                    format!("{}...", &s.summary[..147])
-                } else {
-                    s.summary
-                }
-            })
-            .unwrap_or_default();
-
         candidates.push((
             final_score,
             json!(format!(
-                "{} [score={:.3}]\nReason: {}\nSymbols: {}\nSummary: {}",
+                "{} [score={:.3}]\nReason: {}\nSymbols: {}",
                 make_relative(&ctx.root_path, &file_path),
                 final_score,
                 reason,
-                key_symbols.join(", "),
-                summ_str
+                key_symbols.join(", ")
             )),
         ));
     }
@@ -809,7 +745,6 @@ struct ScoringWeights {
     vector: f32,
     path: f32,
     symbols: f32,
-    summary: f32,
 }
 
 /// Scoring details for transparency
@@ -830,7 +765,6 @@ fn calculate_relevance_score_v2(
     vector_score: f32,
     path_score: f32,
     symbol_score: f32,
-    summary_score: f32,
 ) -> (f32, ScoringDetails) {
     // 1. Determine query type and adjust weights
     let weights = calculate_adaptive_weights(query);
@@ -844,8 +778,7 @@ fn calculate_relevance_score_v2(
     // 4. Calculate base score
     let base_score = vector_score * weights.vector
         + path_score * weights.path
-        + symbol_score * weights.symbols
-        + summary_score * weights.summary;
+        + symbol_score * weights.symbols;
 
     // 5. Apply modifiers
     let final_score = base_score * recency_boost * size_penalty;
@@ -876,21 +809,19 @@ fn calculate_adaptive_weights(query: &str) -> ScoringWeights {
         return ScoringWeights {
             vector: 0.25,
             path: 0.15,
-            symbols: 0.50, // Boost symbols
-            summary: 0.10,
+            symbols: 0.60, // Boost symbols
         };
     }
 
-    // Pattern 2: "how does X work?" -> prioritize summary
+    // Pattern 2: "how does X work?" -> prioritize path and symbols
     if query_lower.contains("how")
         || query_lower.contains("explain")
         || query_lower.contains("what")
     {
         return ScoringWeights {
-            vector: 0.35,
-            path: 0.15,
-            symbols: 0.15,
-            summary: 0.35, // Boost summary
+            vector: 0.40,
+            path: 0.30,
+            symbols: 0.30,
         };
     }
 
@@ -901,19 +832,17 @@ fn calculate_adaptive_weights(query: &str) -> ScoringWeights {
         || query.contains(".js")
     {
         return ScoringWeights {
-            vector: 0.30,
+            vector: 0.40,
             path: 0.40, // Boost path
             symbols: 0.20,
-            summary: 0.10,
         };
     }
 
     // Default: balanced
     ScoringWeights {
-        vector: 0.40,
-        path: 0.20,
+        vector: 0.50,
+        path: 0.25,
         symbols: 0.25,
-        summary: 0.15,
     }
 }
 
@@ -992,12 +921,6 @@ fn generate_selection_reason_v2(
             .collect::<Vec<_>>()
             .join(", ");
         reasons.push(format!("contains relevant symbols ({})", symbol_names));
-    }
-
-    // Summary matching
-    let summary_component = details.base_score * details.weights.summary;
-    if summary_component > 0.10 {
-        reasons.push("summary matches query".to_string());
     }
 
     // Recency
@@ -1195,21 +1118,7 @@ fn calculate_symbol_score(query: &str, symbols: &[crate::models::chunk::SymbolWi
     (matches as f32 / keywords.len() as f32).min(1.0)
 }
 
-/// Calculate summary relevance score
-fn calculate_summary_score(query: &str, summary: &str) -> f32 {
-    let query_lower = query.to_lowercase();
-    let summary_lower = summary.to_lowercase();
-    let keywords: Vec<&str> = query_lower.split_whitespace().collect();
 
-    let mut matches = 0;
-    for keyword in &keywords {
-        if summary_lower.contains(keyword) {
-            matches += 1;
-        }
-    }
-
-    (matches as f32 / keywords.len() as f32).min(1.0)
-}
 
 /// Generate reasoning for file selection
 #[allow(dead_code)]
@@ -1217,7 +1126,6 @@ fn generate_selection_reason(
     vector_score: f32,
     path_score: f32,
     symbol_score: f32,
-    summary_score: f32,
     symbols: &[crate::models::chunk::SymbolWithPath],
     _query: &str,
 ) -> String {
@@ -1241,10 +1149,6 @@ fn generate_selection_reason(
             .collect::<Vec<_>>()
             .join(", ");
         reasons.push(format!("contains relevant symbols ({})", symbol_names));
-    }
-
-    if summary_score > 0.5 {
-        reasons.push("summary matches query".to_string());
     }
 
     if reasons.is_empty() {

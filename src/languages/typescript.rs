@@ -744,7 +744,7 @@ impl TypeScriptService {
             out.push_str("*Not found in index. Scanning project files...*\n\n");
             let ts_files = walk_ts_files(root);
             for f in &ts_files {
-                let Ok(code) = std::fs::read_to_string(f) else {
+                let Ok(code) = tokio::fs::read_to_string(f).await else {
                     continue;
                 };
                 if let Some((kind, text, exported)) = find_type_definition(&code, symbol_name) {
@@ -772,7 +772,7 @@ impl TypeScriptService {
                 // Try to read full definition from file
                 let abs = root.join(&path);
                 if abs.exists() {
-                    let code = std::fs::read_to_string(&abs).unwrap_or_default();
+                    let code = tokio::fs::read_to_string(&abs).await.unwrap_or_default();
                     if let Some((_kind, text, exported)) = find_type_definition(&code, symbol_name)
                     {
                         let exp = if exported { " // exported" } else { "" };
@@ -827,7 +827,7 @@ impl TypeScriptService {
             // Scan files
             let ts_files = walk_ts_files(root);
             for f in &ts_files {
-                let Ok(code) = std::fs::read_to_string(f) else {
+                let Ok(code) = tokio::fs::read_to_string(f).await else {
                     continue;
                 };
                 if let Some((kind, sig, exported)) = find_function_signature(&code, function_name) {
@@ -853,7 +853,7 @@ impl TypeScriptService {
                     // Try reading from file
                     let abs = root.join(&path);
                     if abs.exists() {
-                        let code = std::fs::read_to_string(&abs).unwrap_or_default();
+                        let code = tokio::fs::read_to_string(&abs).await.unwrap_or_default();
                         if let Some((_kind, sig, _exported)) =
                             find_function_signature(&code, function_name)
                         {
@@ -938,7 +938,7 @@ impl TypeScriptService {
                 if resolved.exists() {
                     let ext = resolved.extension().and_then(|e| e.to_str()).unwrap_or("");
                     if ["ts", "tsx", "js", "jsx"].contains(&ext) {
-                        let code = std::fs::read_to_string(&resolved).unwrap_or_default();
+                        let code = tokio::fs::read_to_string(&resolved).await.unwrap_or_default();
                         let exports = collect_exports(&code);
                         if !exports.is_empty() {
                             out.push_str("\n**Available exports:**\n");

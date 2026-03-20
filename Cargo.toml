@@ -32,7 +32,6 @@ toml = "0.8"
 
 # Embeddings
 fastembed = "5"
-ureq = "3"
 
 
 # File Watcher
@@ -67,7 +66,6 @@ daemonize = "0.5"
 dirs = "5"
 futures = "0.3"
 num_cpus = "1"
-reqwest = { version = "0.12", features = ["json"] }
 thiserror = "2"
 tracing = "0.1"
 tokio-util = "0.7"

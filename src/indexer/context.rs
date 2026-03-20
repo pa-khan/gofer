@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use crate::indexer::parser::{self, CodeParser, SupportedLanguage};
 use crate::models::{ContextBundle, DependencyFile};
 
-pub fn create_bundle(main_path: &Path, max_depth: u32) -> ContextBundle {
-    let main_content = std::fs::read_to_string(main_path).unwrap_or_default();
+pub async fn create_bundle(main_path: &Path, max_depth: u32) -> ContextBundle {
+    let main_content = tokio::fs::read_to_string(main_path).await.unwrap_or_default();
     let mut dependencies = Vec::new();
     let mut visited = HashSet::new();
     visited.insert(main_path.canonicalize().unwrap_or(main_path.to_path_buf()));
@@ -22,7 +22,7 @@ pub fn create_bundle(main_path: &Path, max_depth: u32) -> ContextBundle {
 
         for import in imports {
             if import.is_relative {
-                if let Some(resolved) = resolve_import(&import.path, base_dir, language) {
+                if let Some(resolved) = resolve_import(&import.path, base_dir, language).await {
                     collect_dependency(
                         &resolved,
                         &import.items.join(", "),
@@ -30,7 +30,7 @@ pub fn create_bundle(main_path: &Path, max_depth: u32) -> ContextBundle {
                         &mut visited,
                         max_depth,
                         1,
-                    );
+                    ).await;
                 }
             }
         }
@@ -55,14 +55,15 @@ pub fn create_bundle(main_path: &Path, max_depth: u32) -> ContextBundle {
     }
 }
 
-fn resolve_import(
-    import_path: &str,
-    base_dir: &Path,
+fn resolve_import<'a>(
+    import_path: &'a str,
+    base_dir: &'a Path,
     language: SupportedLanguage,
-) -> Option<PathBuf> {
-    let normalized = import_path
-        .trim_start_matches("./")
-        .trim_start_matches("@/");
+) -> core::pin::Pin<Box<dyn core::future::Future<Output = Option<PathBuf>> + Send + 'a>> {
+    Box::pin(async move {
+        let normalized = import_path
+            .trim_start_matches("./")
+            .trim_start_matches("@/");
 
     let extensions: &[&str] = match language {
         SupportedLanguage::Rust => &["rs"],
@@ -97,7 +98,7 @@ fn resolve_import(
         let rel_path = import_path.trim_start_matches("@/");
 
         // Попробовать найти tsconfig.json и прочитать paths
-        if let Some(resolved) = resolve_tsconfig_paths(import_path, base_dir, extensions) {
+        if let Some(resolved) = resolve_tsconfig_paths(import_path, base_dir, extensions).await {
             return Some(resolved);
         }
 
@@ -159,10 +160,11 @@ fn resolve_import(
     }
 
     None
+    })
 }
 
 /// Попытка разрешить import через tsconfig.json compilerOptions.paths
-fn resolve_tsconfig_paths(
+async fn resolve_tsconfig_paths(
     import_path: &str,
     base_dir: &Path,
     extensions: &[&str],
@@ -173,7 +175,7 @@ fn resolve_tsconfig_paths(
         .map(|p| p.join("tsconfig.json"))
         .find(|p| p.exists())?;
 
-    let tsconfig_content = std::fs::read_to_string(&tsconfig_path).ok()?;
+    let tsconfig_content = tokio::fs::read_to_string(&tsconfig_path).await.ok()?;
     let tsconfig: serde_json::Value = serde_json::from_str(&tsconfig_content).ok()?;
 
     let paths = tsconfig
@@ -222,23 +224,27 @@ fn resolve_tsconfig_paths(
     None
 }
 
-fn collect_dependency(
-    path: &Path,
-    reason: &str,
-    deps: &mut Vec<DependencyFile>,
-    visited: &mut HashSet<PathBuf>,
+fn collect_dependency<'a>(
+    path: &'a Path,
+    reason: &'a str,
+    deps: &'a mut Vec<DependencyFile>,
+    visited: &'a mut HashSet<PathBuf>,
     max_depth: u32,
     current_depth: u32,
-) {
+) -> core::pin::Pin<Box<dyn core::future::Future<Output = ()> + Send + 'a>> {
+    Box::pin(async move {
     let canonical = path.canonicalize().unwrap_or(path.to_path_buf());
     if visited.contains(&canonical) || current_depth > max_depth {
         return;
     }
-    visited.insert(canonical);
+    visited.insert(canonical.clone());
 
-    let content = match std::fs::read_to_string(path) {
+    let content = match tokio::fs::read_to_string(path).await {
         Ok(c) => c,
-        Err(_) => return,
+        Err(_) => {
+            visited.remove(&canonical);
+            return;
+        }
     };
 
     deps.push(DependencyFile {
@@ -257,7 +263,7 @@ fn collect_dependency(
 
             for import in imports {
                 if import.is_relative {
-                    if let Some(resolved) = resolve_import(&import.path, base_dir, language) {
+                    if let Some(resolved) = resolve_import(&import.path, base_dir, language).await {
                         collect_dependency(
                             &resolved,
                             &import.items.join(", "),
@@ -265,12 +271,13 @@ fn collect_dependency(
                             visited,
                             max_depth,
                             current_depth + 1,
-                        );
+                        ).await;
                     }
                 }
             }
         }
     }
+    })
 }
 
 fn generate_markdown(main_path: &Path, main_content: &str, deps: &[DependencyFile]) -> String {

@@ -329,11 +329,7 @@ async fn activate_with_progress(
     let mut total_ticks = 0u32;
 
     // Setup signal handler for graceful interruption
-    let mut sigint = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
-    {
-        Ok(s) => Some(s),
-        Err(_) => None,
-    };
+    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()).ok();
 
     loop {
         tokio::select! {
@@ -890,12 +886,6 @@ pool_size = 4
 [reranker]
 enabled = true
 model_dir = ".gofer/data/models/reranker"
-
-[summarizer]
-enable_llm = true
-model_id = "qwen2.5-coder:1.5b"
-max_tokens = 150
-temperature = 0.3
 
 [domains]
 rs_paths = []

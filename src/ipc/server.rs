@@ -39,8 +39,8 @@ pub async fn run_daemon(state: Arc<DaemonState>) -> Result<()> {
                     Ok(p) => p,
                     Err(_) => {
                         tracing::warn!(
-                            "Max connections reached (256), rejecting new connection (current: {})",
-                            256 - state.connection_semaphore.available_permits()
+                            "Max connections reached (1024), rejecting new connection (current: {})",
+                            1024 - state.connection_semaphore.available_permits()
                         );
                         continue;
                     }
@@ -48,7 +48,7 @@ pub async fn run_daemon(state: Arc<DaemonState>) -> Result<()> {
 
                 tokio::spawn(async move {
                     let conn_start = std::time::Instant::now();
-                    tracing::debug!("New connection accepted (active connections: {})", 256 - state.connection_semaphore.available_permits());
+                    tracing::debug!("New connection accepted (active connections: {})", 1024 - state.connection_semaphore.available_permits());
 
                     if let Err(e) = handle_connection(stream, state.clone()).await {
                         tracing::error!("Connection error: {}", e);
@@ -58,7 +58,7 @@ pub async fn run_daemon(state: Arc<DaemonState>) -> Result<()> {
                     tracing::debug!(
                         "Connection closed after {:?} (active connections: {})",
                         duration,
-                        256 - state.connection_semaphore.available_permits() - 1
+                        1024 - state.connection_semaphore.available_permits() - 1
                     );
                     drop(permit); // release on exit
                 });
@@ -114,8 +114,8 @@ async fn handle_connection(stream: tokio::net::UnixStream, state: Arc<DaemonStat
         }
     });
 
-    // Per-connection rate limiter: max 100 requests per second
-    const RATE_LIMIT: u32 = 100;
+    // Per-connection rate limiter: max 1000 requests per second
+    const RATE_LIMIT: u32 = 1000;
     // Idle timeout: close connection after 5 minutes of inactivity
     const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
@@ -158,7 +158,7 @@ async fn handle_connection(stream: tokio::net::UnixStream, state: Arc<DaemonStat
             let resp = DaemonResponse::error(
                 Value::Null,
                 -32000,
-                "Rate limit exceeded (100 req/s per connection)".into(),
+                "Rate limit exceeded (1000 req/s per connection)".into(),
             );
             let out =
                 simd_json::to_string(&resp).map_err(|e| anyhow::anyhow!("simd_json: {}", e))?;
@@ -504,17 +504,14 @@ async fn handle_summary_stats(
     };
 
     match state.get_or_load_project(project_path).await {
-        Ok(project) => match project.sqlite.get_summary_queue_stats().await {
-            Ok((pending, processing, failed)) => DaemonResponse::success(
+        Ok(_) => DaemonResponse::success(
                 id,
                 json!({
-                    "pending": pending,
-                    "processing": processing,
-                    "failed": failed,
+                    "pending": 0,
+                    "processing": 0,
+                    "failed": 0,
                 }),
             ),
-            Err(e) => DaemonResponse::error(id, -32000, format!("Stats query failed: {}", e)),
-        },
         Err(e) => DaemonResponse::error(id, -32000, format!("Project load failed: {}", e)),
     }
 }
@@ -850,8 +847,7 @@ async fn resource_project_stats(ctx: &tools::ToolContext) -> anyhow::Result<Valu
     let domain_stats: Vec<(String, i64)> = ctx.sqlite.get_domain_stats().await?;
     let symbols: Vec<crate::models::chunk::SymbolWithPath> =
         ctx.sqlite.get_symbols(None, None, 0, 10000).await?;
-    let summaries: Vec<crate::models::chunk::FileSummaryWithPath> =
-        ctx.sqlite.get_all_summaries().await?;
+
     let errors: Vec<crate::models::chunk::ActiveError> =
         ctx.sqlite.get_errors(None, None, 0, 10000).await?;
 
@@ -866,7 +862,7 @@ async fn resource_project_stats(ctx: &tools::ToolContext) -> anyhow::Result<Valu
             "total": symbols.len(),
             "by_kind": kind_counts
         },
-        "summaries": summaries.len(),
+        "summaries": 0,
         "errors": errors.len(),
         "domains": domain_stats.iter().map(|(d, c)| json!({
             "domain": d,

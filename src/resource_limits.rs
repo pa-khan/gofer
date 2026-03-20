@@ -16,7 +16,7 @@ pub struct ResourceLimits {
 impl Default for ResourceLimits {
     fn default() -> Self {
         Self {
-            max_concurrent_requests: 100,
+            max_concurrent_requests: 1024,
             active_requests: Arc::new(AtomicUsize::new(0)),
         }
     }

@@ -24,8 +24,6 @@ pub struct GoferConfig {
     pub indexer: IndexerConfig,
     #[serde(default)]
     pub embedding: EmbeddingConfig,
-    #[serde(default)]
-    pub summarizer: SummarizerTomlConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
@@ -85,38 +83,6 @@ impl Default for EmbeddingConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct SummarizerTomlConfig {
-    #[serde(default)]
-    pub enable_llm: bool,
-    #[serde(default = "default_model_id")]
-    pub model_id: String,
-    #[serde(default = "default_max_tokens")]
-    pub max_tokens: usize,
-    #[serde(default = "default_temperature")]
-    pub temperature: f64,
-}
-
-fn default_model_id() -> String {
-    "qwen2.5-coder:1.5b".to_string()
-}
-fn default_max_tokens() -> usize {
-    150
-}
-fn default_temperature() -> f64 {
-    0.3
-}
-
-impl Default for SummarizerTomlConfig {
-    fn default() -> Self {
-        Self {
-            enable_llm: true,
-            model_id: default_model_id(),
-            max_tokens: default_max_tokens(),
-            temperature: default_temperature(),
-        }
-    }
-}
 
 /// Load gofer configuration from .gofer/config.toml
 pub fn load_config(gofer_dir: &Path) -> GoferConfig {
@@ -180,7 +146,7 @@ pub fn find_watchable_dirs(root: &Path, extra_ignores: &[String]) -> Vec<PathBuf
         .git_exclude(true)
         .filter_entry(|e| {
             // Only yield directories for watch targets
-            e.file_type().map_or(false, |ft| ft.is_dir())
+            e.file_type().is_some_and(|ft| ft.is_dir())
         });
 
     let mut overrides = ignore::overrides::OverrideBuilder::new(root);

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 
 use crate::cache::CacheManager;
 use crate::error_recovery::CircuitBreaker;
@@ -12,7 +12,7 @@ use crate::storage::{LanceStorage, SqliteStorage};
 #[derive(Clone)]
 pub struct ToolContext {
     pub sqlite: Arc<SqliteStorage>,
-    pub lance: Arc<Mutex<LanceStorage>>,
+    pub lance: Arc<LanceStorage>,
     pub embedder: Arc<EmbedderPool>,
     pub root_path: Arc<PathBuf>,
     pub cache: Arc<CacheManager>,

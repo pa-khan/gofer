@@ -8,8 +8,8 @@ use thiserror::Error;
 
 use crate::models::{
     ActiveError, ApiEndpointInfo, ConfigKey, CrossStackLink, Dependency, DependencyUsage,
-    DependencyUsageInfo, FileSummary, FileSummaryWithPath, FrontendApiCallInfo, IndexedFile,
-    ReferenceWithPath, Rule, SummaryQueueItem, Symbol, SymbolReference, SymbolWithPath,
+    DependencyUsageInfo, FrontendApiCallInfo, IndexedFile,
+    ReferenceWithPath, Rule, Symbol, SymbolReference, SymbolWithPath,
     TypeFingerprint, VueTree,
 };
 
@@ -103,9 +103,9 @@ impl SqliteStorage {
 
         // Feature 015: Enhanced connection pooling
         let pool = SqlitePoolOptions::new()
-            .max_connections(20) // Max concurrent connections
+            .max_connections(64) // Max concurrent connections
             .min_connections(5) // Keep 5 connections always ready
-            .acquire_timeout(std::time::Duration::from_secs(5)) // Wait up to 5s for connection
+            .acquire_timeout(std::time::Duration::from_secs(30)) // Wait up to 30s for connection
             .idle_timeout(Some(std::time::Duration::from_secs(300))) // Close idle connections after 5min
             .max_lifetime(Some(std::time::Duration::from_secs(1800))) // Recycle connections every 30min
             .connect(&connection_string)
@@ -118,7 +118,7 @@ impl SqliteStorage {
         sqlx::query("PRAGMA synchronous = NORMAL")
             .execute(&pool)
             .await?;
-        sqlx::query("PRAGMA busy_timeout = 5000")
+        sqlx::query("PRAGMA busy_timeout = 30000")
             .execute(&pool)
             .await?;
         sqlx::query("PRAGMA auto_vacuum = INCREMENTAL")
@@ -1416,193 +1416,7 @@ impl SqliteStorage {
         Ok(calls)
     }
 
-    // === Summary Operations ===
 
-    /// Insert or update a file summary
-    pub async fn upsert_summary(
-        &self,
-        file_id: i64,
-        summary: &str,
-        source: &str,
-        model_name: Option<&str>,
-        confidence: Option<f64>,
-    ) -> Result<()> {
-        let now = chrono::Utc::now().timestamp();
-
-        sqlx::query(
-            r#"
-            INSERT INTO file_summaries (file_id, summary, summary_source, model_name, confidence, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(file_id) DO UPDATE SET
-                summary = excluded.summary,
-                summary_source = excluded.summary_source,
-                model_name = excluded.model_name,
-                confidence = excluded.confidence,
-                updated_at = excluded.updated_at
-            "#
-        )
-        .bind(file_id)
-        .bind(summary)
-        .bind(source)
-        .bind(model_name)
-        .bind(confidence)
-        .bind(now)
-        .bind(now)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
-
-    /// Get summary for a file
-    pub async fn get_summary(&self, file_id: i64) -> Result<Option<FileSummary>> {
-        let summary =
-            sqlx::query_as::<_, FileSummary>("SELECT * FROM file_summaries WHERE file_id = ?")
-                .bind(file_id)
-                .fetch_optional(&self.pool)
-                .await?;
-
-        Ok(summary)
-    }
-
-    /// Get summary by file path
-    pub async fn get_summary_by_path(
-        &self,
-        file_path: &str,
-    ) -> Result<Option<FileSummaryWithPath>> {
-        let summary = sqlx::query_as::<_, FileSummaryWithPath>(
-            r#"
-            SELECT fs.id, f.path as file_path, fs.summary, fs.summary_source
-            FROM file_summaries fs
-            JOIN files f ON fs.file_id = f.id
-            WHERE f.path = ?
-            "#,
-        )
-        .bind(file_path)
-        .fetch_optional(&self.pool)
-        .await?;
-
-        Ok(summary)
-    }
-
-    /// Get all summaries (for search)
-    pub async fn get_all_summaries(&self) -> Result<Vec<FileSummaryWithPath>> {
-        let summaries = sqlx::query_as::<_, FileSummaryWithPath>(
-            r#"
-            SELECT fs.id, f.path as file_path, fs.summary, fs.summary_source
-            FROM file_summaries fs
-            JOIN files f ON fs.file_id = f.id
-            ORDER BY f.path
-            "#,
-        )
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(summaries)
-    }
-
-    /// Add file to summary queue
-    pub async fn queue_for_summary(&self, file_id: i64, priority: i32) -> Result<()> {
-        let now = chrono::Utc::now().timestamp();
-
-        sqlx::query(
-            r#"
-            INSERT INTO summary_queue (file_id, priority, status, created_at)
-            VALUES (?, ?, 'pending', ?)
-            ON CONFLICT(file_id, status) DO UPDATE SET priority = MAX(priority, excluded.priority)
-            "#,
-        )
-        .bind(file_id)
-        .bind(priority)
-        .bind(now)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
-
-    /// Get next item from summary queue
-    pub async fn pop_summary_queue(&self) -> Result<Option<SummaryQueueItem>> {
-        // Start transaction
-        let mut tx = self.pool.begin().await?;
-
-        // Get highest priority pending item
-        let item = sqlx::query_as::<_, SummaryQueueItem>(
-            r#"
-            SELECT * FROM summary_queue
-            WHERE status = 'pending'
-            ORDER BY priority DESC, created_at ASC
-            LIMIT 1
-            "#,
-        )
-        .fetch_optional(&mut *tx)
-        .await?;
-
-        if let Some(ref item) = item {
-            // Mark as processing
-            sqlx::query("UPDATE summary_queue SET status = 'processing' WHERE id = ?")
-                .bind(item.id)
-                .execute(&mut *tx)
-                .await?;
-        }
-
-        tx.commit().await?;
-        Ok(item)
-    }
-
-    /// Mark summary queue item as completed
-    pub async fn complete_summary_queue(&self, queue_id: i64) -> Result<()> {
-        sqlx::query("DELETE FROM summary_queue WHERE id = ?")
-            .bind(queue_id)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    /// Mark summary queue item as failed
-    pub async fn fail_summary_queue(&self, queue_id: i64, error: &str) -> Result<()> {
-        sqlx::query("UPDATE summary_queue SET status = 'failed', error_message = ? WHERE id = ?")
-            .bind(error)
-            .bind(queue_id)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    /// Recover stuck items: reset 'processing' → 'pending' (call on startup).
-    pub async fn recover_summary_queue(&self) -> Result<u64> {
-        // Use UPDATE OR IGNORE to prevent unique constraint violations
-        let result = sqlx::query(
-            "UPDATE OR IGNORE summary_queue SET status = 'pending' WHERE status = 'processing'",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        // Delete any remaining 'processing' items that couldn't be updated due to conflicts
-        sqlx::query("DELETE FROM summary_queue WHERE status = 'processing'")
-            .execute(&self.pool)
-            .await?;
-
-        Ok(result.rows_affected())
-    }
-
-    /// Get queue stats
-    pub async fn get_summary_queue_stats(&self) -> Result<(i64, i64, i64)> {
-        let pending: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM summary_queue WHERE status = 'pending'")
-                .fetch_one(&self.pool)
-                .await?;
-        let processing: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM summary_queue WHERE status = 'processing'")
-                .fetch_one(&self.pool)
-                .await?;
-        let failed: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM summary_queue WHERE status = 'failed'")
-                .fetch_one(&self.pool)
-                .await?;
-
-        Ok((pending.0, processing.0, failed.0))
-    }
 
     // === Type Fingerprints Operations ===
 

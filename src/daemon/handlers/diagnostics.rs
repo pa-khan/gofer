@@ -55,10 +55,17 @@ pub async fn tool_get_errors(args: Value, ctx: &ToolContext) -> Result<Value> {
     }))
 }
 
-pub async fn tool_run_diagnostics(ctx: &ToolContext) -> Result<Value> {
-    use crate::indexer::diagnostics;
+pub async fn tool_run_diagnostics(args: Value, ctx: &ToolContext) -> Result<Value> {
+    use crate::indexer::diagnostics::{self, CargoCheckOptions};
 
-    let result = diagnostics::run_diagnostics(&ctx.root_path, &ctx.sqlite).await?;
+    let options = CargoCheckOptions {
+        workspace: args.get("workspace").and_then(|v| v.as_bool()),
+        all_targets: args.get("all_targets").and_then(|v| v.as_bool()),
+        package: args.get("package").and_then(|v| v.as_str()).map(String::from),
+        manifest_path: args.get("manifest_path").and_then(|v| v.as_str()).map(String::from),
+    };
+
+    let result = diagnostics::run_diagnostics(&ctx.root_path, &ctx.sqlite, options).await?;
 
     Ok(json!({
         "cargo": { "errors": result.cargo_errors, "warnings": result.cargo_warnings },
@@ -67,9 +74,9 @@ pub async fn tool_run_diagnostics(ctx: &ToolContext) -> Result<Value> {
     }))
 }
 
-pub async fn tool_run_check(_args: Value, ctx: &ToolContext) -> Result<Value> {
+pub async fn tool_run_check(args: Value, ctx: &ToolContext) -> Result<Value> {
     // Delegate to run_diagnostics — same logic, just a cleaner name
-    tool_run_diagnostics(ctx).await
+    tool_run_diagnostics(args, ctx).await
 }
 
 pub async fn tool_health_check(ctx: &ToolContext) -> Result<Value> {
@@ -104,8 +111,7 @@ pub async fn tool_health_check(ctx: &ToolContext) -> Result<Value> {
     // 2. LanceDB check — verify table exists and can be queried
     let lance_start = Instant::now();
     let lance_status = {
-        let lance = ctx.lance.lock().await;
-        match lance.count().await {
+        match ctx.lance.count().await {
             Ok(count) => {
                 json!({
                     "name": "lancedb",

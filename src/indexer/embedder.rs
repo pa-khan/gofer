@@ -480,21 +480,21 @@ mod tests {
     #[test]
     fn test_dimension() {
         let pool = EmbedderPool::new(1).unwrap();
-        // BGESmallENV15 has 384 dimensions
-        assert_eq!(pool.dimension(), 384);
+        // NomicEmbedTextV15 has 768 dimensions
+        assert_eq!(pool.dimension(), 768);
     }
 
     #[test]
     fn test_model_name() {
         let pool = EmbedderPool::new(1).unwrap();
-        // Default model is BGESmallENV15
-        assert_eq!(pool.model_name(), "BGESmallENV15");
+        // Default model is NomicEmbedTextV15
+        assert_eq!(pool.model_name(), "NomicEmbedTextV15");
     }
 
     #[test]
     fn test_cache_version_key() {
         let pool = EmbedderPool::new(1).unwrap();
-        assert_eq!(pool.cache_version_key(), "BGESmallENV15:384");
+        assert_eq!(pool.cache_version_key(), "NomicEmbedTextV15:768");
     }
 
     #[test]
@@ -563,7 +563,7 @@ mod tests {
         assert!(result.is_ok());
         let embeddings = result.unwrap();
         assert_eq!(embeddings.len(), 1);
-        assert_eq!(embeddings[0].len(), 384); // BGESmallENV15 dimension
+        assert_eq!(embeddings[0].len(), 768); // NomicEmbedTextV15 dimension
     }
 
     #[tokio::test]
@@ -580,7 +580,7 @@ mod tests {
         let embeddings = result.unwrap();
         assert_eq!(embeddings.len(), 3);
         for emb in &embeddings {
-            assert_eq!(emb.len(), 384);
+            assert_eq!(emb.len(), 768);
         }
     }
 
@@ -591,7 +591,7 @@ mod tests {
 
         assert!(result.is_ok());
         let embedding = result.unwrap();
-        assert_eq!(embedding.len(), 384);
+        assert_eq!(embedding.len(), 768);
     }
 
     #[tokio::test]
@@ -660,7 +660,7 @@ mod tests {
         for handle in handles {
             let result = handle.await.unwrap();
             assert!(result.is_ok());
-            assert_eq!(result.unwrap().len(), 384);
+            assert_eq!(result.unwrap().len(), 768);
         }
     }
 
@@ -672,7 +672,7 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), 384);
+        assert_eq!(result.unwrap().len(), 768);
     }
 
     #[tokio::test]
@@ -683,7 +683,7 @@ mod tests {
         let result = pool.embed_query(&long_text).await;
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), 384);
+        assert_eq!(result.unwrap().len(), 768);
     }
 
     #[tokio::test]
@@ -694,7 +694,7 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), 384);
+        assert_eq!(result.unwrap().len(), 768);
     }
 
     // -------------------------------------------------------------------------

@@ -75,10 +75,10 @@ impl ScoringIndex {
     }
 
     /// Save index to disk using rkyv
-    pub fn save_to_file(&self, path: &Path) -> std::io::Result<()> {
+    pub async fn save_to_file(&self, path: &Path) -> std::io::Result<()> {
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+            tokio::fs::create_dir_all(parent).await?;
         }
 
         // Serialize with rkyv
@@ -86,7 +86,7 @@ impl ScoringIndex {
             rkyv::to_bytes::<_, 256>(self).map_err(|e| std::io::Error::other(e.to_string()))?;
 
         // Write to file
-        std::fs::write(path, bytes)?;
+        tokio::fs::write(path, bytes).await?;
 
         tracing::info!(
             "Scoring index saved to {:?} ({} files)",
@@ -97,9 +97,9 @@ impl ScoringIndex {
     }
 
     /// Load index from disk using mmap for zero-copy access
-    pub fn load_from_file(path: &Path) -> std::io::Result<Self> {
+    pub async fn load_from_file(path: &Path) -> std::io::Result<Self> {
         // Read file into memory
-        let bytes = std::fs::read(path)?;
+        let bytes = tokio::fs::read(path).await?;
 
         // Zero-copy deserialization with validation
         match rkyv::check_archived_root::<ScoringIndex>(&bytes) {
@@ -182,8 +182,8 @@ impl Default for ScoringIndex {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_scoring_index_roundtrip() {
+    #[tokio::test]
+    async fn test_scoring_index_roundtrip() {
         let mut index = ScoringIndex::new();
 
         index.add_file(FileScoringData {
@@ -198,10 +198,10 @@ mod tests {
 
         // Save to temp file
         let temp_path = std::env::temp_dir().join("test_scoring_index.rkyv");
-        index.save_to_file(&temp_path).unwrap();
+        index.save_to_file(&temp_path).await.unwrap();
 
         // Load back
-        let loaded = ScoringIndex::load_from_file(&temp_path).unwrap();
+        let loaded = ScoringIndex::load_from_file(&temp_path).await.unwrap();
 
         assert_eq!(loaded.files.len(), 1);
         let data = loaded.get("/test/foo.rs").unwrap();

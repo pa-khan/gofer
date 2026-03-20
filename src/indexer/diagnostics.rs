@@ -82,24 +82,49 @@ struct TscDiagnostic {
     message: String,
 }
 
+#[derive(Debug, Default)]
+pub struct CargoCheckOptions {
+    pub workspace: Option<bool>,
+    pub all_targets: Option<bool>,
+    pub package: Option<String>,
+    pub manifest_path: Option<String>,
+}
+
 /// Run cargo check and collect diagnostics
 pub async fn run_cargo_check(
     root: &Path,
     sqlite: &SqliteStorage,
+    options: CargoCheckOptions,
 ) -> anyhow::Result<(usize, usize)> {
     let cargo_toml = root.join("Cargo.toml");
     if !cargo_toml.exists() {
         return Ok((0, 0));
     }
 
-    tracing::info!("Running cargo check...");
+    tracing::info!("Running cargo check with options: {:?}", options);
 
-    let output = Command::new("cargo")
-        .arg("check")
+    let mut cmd = tokio::process::Command::new("cargo");
+    cmd.arg("check")
         .arg("--message-format=json")
-        .arg("--quiet")
+        .arg("--quiet");
+
+    if options.workspace.unwrap_or(false) {
+        cmd.arg("--workspace");
+    }
+    if options.all_targets.unwrap_or(false) {
+        cmd.arg("--all-targets");
+    }
+    if let Some(pkg) = options.package {
+        cmd.arg("-p").arg(pkg);
+    }
+    if let Some(manifest) = options.manifest_path {
+        cmd.arg("--manifest-path").arg(manifest);
+    }
+
+    let output = cmd
         .current_dir(root)
-        .output()?;
+        .output()
+        .await?;
 
     // Clear existing errors
     sqlite.clear_active_errors().await?;
@@ -273,6 +298,7 @@ pub async fn run_tsc_check(root: &Path, sqlite: &SqliteStorage) -> anyhow::Resul
 pub async fn run_diagnostics(
     root: &Path,
     sqlite: &SqliteStorage,
+    options: CargoCheckOptions,
 ) -> anyhow::Result<DiagnosticsResult> {
     if !rate_check(&LAST_DIAGNOSTICS, DIAGNOSTICS_COOLDOWN_SECS).await {
         return Ok(DiagnosticsResult {
@@ -287,7 +313,7 @@ pub async fn run_diagnostics(
 
     sqlite.clear_active_errors().await?;
 
-    let (cargo_errors, cargo_warnings) = run_cargo_check(root, sqlite).await.unwrap_or((0, 0));
+    let (cargo_errors, cargo_warnings) = run_cargo_check(root, sqlite, options).await.unwrap_or((0, 0));
     let (tsc_errors, tsc_warnings) = run_tsc_check(root, sqlite).await.unwrap_or((0, 0));
 
     Ok(DiagnosticsResult {

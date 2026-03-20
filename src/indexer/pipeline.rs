@@ -99,7 +99,7 @@ pub async fn run_pipeline(
     root: &Path,
     extra_ignores: &[String],
     sqlite: SqliteStorage,
-    lance: Arc<Mutex<LanceStorage>>,
+    lance: Arc<LanceStorage>,
     embedder: Arc<EmbedderPool>,
     progress: Option<Arc<SyncProgress>>,
     cancel: CancellationToken,
@@ -238,8 +238,7 @@ pub async fn run_pipeline(
 
     // Post-pipeline: compact LanceDB fragments to prevent read amplification
     if !metadata.is_empty() {
-        let lance_guard = lance_compact.lock().await;
-        if let Err(e) = lance_guard.compact().await {
+        if let Err(e) = lance_compact.compact().await {
             tracing::warn!("LanceDB compaction failed (non-fatal): {}", e);
         }
     }
@@ -863,7 +862,7 @@ async fn embedder_stage(
 
 async fn writer_stage(
     sqlite: SqliteStorage,
-    lance: Arc<Mutex<LanceStorage>>,
+    lance: Arc<LanceStorage>,
     mut rx: mpsc::Receiver<EmbeddedBatch>,
     collected: Arc<Mutex<Vec<ParsedFileMetadata>>>,
     progress: Option<Arc<SyncProgress>>,
@@ -896,8 +895,7 @@ async fn writer_stage(
         // Write chunks+embeddings to LanceDB immediately
         if !batch.chunks.is_empty() {
             tracing::debug!("Writer: writing {} chunks to LanceDB", batch.chunks.len());
-            let mut lance_guard = lance.lock().await;
-            if let Err(e) = lance_guard
+            if let Err(e) = lance
                 .upsert_chunks(&batch.chunks, &batch.embeddings)
                 .await
             {
@@ -1209,16 +1207,7 @@ async fn flush_sqlite_batch(
         return;
     }
 
-    // Queue committed files for summarization
-    for &(file_id, _) in &metadata_for_collection {
-        if let Err(e) = sqlite.queue_for_summary(file_id, 0).await {
-            tracing::debug!(
-                "Writer: queue_for_summary failed for file_id={}: {}",
-                file_id,
-                e
-            );
-        }
-    }
+
 
     // Push to shared collection (outside transaction scope)
     let mut coll = collected.lock().await;

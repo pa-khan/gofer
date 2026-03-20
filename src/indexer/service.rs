@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use tokio::sync::{mpsc, Mutex, Semaphore};
+use tokio::sync::{mpsc, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use super::domains::{
@@ -20,7 +20,7 @@ use crate::storage::{LanceStorage, SqliteStorage};
 #[derive(Clone)]
 pub struct IndexerService {
     sqlite: SqliteStorage,
-    lance: Arc<Mutex<LanceStorage>>,
+    lance: Arc<LanceStorage>,
     embedder: Arc<EmbedderPool>,
     cache: Option<Arc<CacheManager>>,
     parallel_workers: usize,
@@ -29,7 +29,7 @@ pub struct IndexerService {
 impl IndexerService {
     pub fn new(
         sqlite: SqliteStorage,
-        lance: Arc<Mutex<LanceStorage>>,
+        lance: Arc<LanceStorage>,
         embedder: Arc<EmbedderPool>,
         parallel_workers: usize,
     ) -> Self {
@@ -133,11 +133,7 @@ impl IndexerService {
 
         let file_id = self.sqlite.upsert_file(&path_str, modified, &hash).await?;
 
-        // Queue for summarization (Feature 006)
-        // Priority 10 ensures recent changes are processed before bulk backfill
-        if let Err(e) = self.sqlite.queue_for_summary(file_id, 10).await {
-            tracing::warn!("Failed to queue summary for {}: {}", path_str, e);
-        }
+
 
         let symbols_with_file_id: Vec<Symbol> = symbols
             .into_iter()
@@ -220,8 +216,7 @@ impl IndexerService {
         if !chunks.is_empty() {
             let texts: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
             let embeddings = self.embedder.embed(texts).await?;
-            let mut lance = self.lance.lock().await;
-            lance.upsert_chunks(&chunks, &embeddings).await?;
+            self.lance.upsert_chunks(&chunks, &embeddings).await?;
         }
 
         tracing::info!(
@@ -247,8 +242,7 @@ impl IndexerService {
         let path_str = path.to_string_lossy().to_string();
         self.sqlite.delete_file(&path_str).await?;
         {
-            let lance = self.lance.lock().await;
-            lance.delete_file(&path_str).await?;
+            self.lance.delete_file(&path_str).await?;
         }
 
         // Feature 012: Invalidate cache for deleted file
@@ -378,8 +372,7 @@ impl IndexerService {
 
         // Phase 6: Build vector index for ANN search (incremental)
         {
-            let lance = self.lance.lock().await;
-            if let Err(e) = lance
+            if let Err(e) = self.lance
                 .create_vector_index_incremental(Some(&self.sqlite))
                 .await
             {
@@ -440,7 +433,7 @@ async fn detect_and_store_subprojects(root: &Path, sqlite: &SqliteStorage) -> us
     let mut subprojects: Vec<(String, String, String, Option<String>)> = Vec::new(); // (name, rel_path, kind, parent)
 
     // Phase 1: Resolve npm/pnpm/yarn workspaces from root manifests
-    let workspace_dirs = resolve_npm_workspaces(root);
+    let workspace_dirs = resolve_npm_workspaces(root).await;
 
     for ws_dir in &workspace_dirs {
         let rel_path = match ws_dir.strip_prefix(root) {
@@ -455,7 +448,7 @@ async fn detect_and_store_subprojects(root: &Path, sqlite: &SqliteStorage) -> us
         // Read package name from package.json if available
         let pkg_name = ws_dir.join("package.json");
         let display_name = if pkg_name.exists() {
-            std::fs::read_to_string(&pkg_name)
+            tokio::fs::read_to_string(&pkg_name).await
                 .ok()
                 .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
                 .and_then(|v| v.get("name")?.as_str().map(String::from))
@@ -559,13 +552,13 @@ async fn detect_and_store_subprojects(root: &Path, sqlite: &SqliteStorage) -> us
 }
 
 /// Resolve npm/pnpm/yarn workspace package directories from root manifests.
-fn resolve_npm_workspaces(root: &Path) -> Vec<std::path::PathBuf> {
+async fn resolve_npm_workspaces(root: &Path) -> Vec<std::path::PathBuf> {
     let mut dirs = Vec::new();
 
     // Try pnpm-workspace.yaml first
     let pnpm_ws = root.join("pnpm-workspace.yaml");
     if pnpm_ws.exists() {
-        if let Ok(content) = std::fs::read_to_string(&pnpm_ws) {
+        if let Ok(content) = tokio::fs::read_to_string(&pnpm_ws).await {
             // Simple YAML parsing: extract lines matching "  - packages/*" patterns
             for line in content.lines() {
                 let trimmed = line.trim().trim_start_matches('-').trim();
@@ -582,7 +575,7 @@ fn resolve_npm_workspaces(root: &Path) -> Vec<std::path::PathBuf> {
     // Try package.json workspaces field
     let pkg_json = root.join("package.json");
     if pkg_json.exists() {
-        if let Ok(content) = std::fs::read_to_string(&pkg_json) {
+        if let Ok(content) = tokio::fs::read_to_string(&pkg_json).await {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
                 // "workspaces": ["packages/*", "apps/*"]
                 // or "workspaces": { "packages": ["packages/*"] }

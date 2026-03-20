@@ -13,7 +13,6 @@ use tokio_util::sync::CancellationToken;
 use super::registry::{ProjectRecord, RegistryDb};
 use crate::cache::CacheManager;
 use crate::error_recovery::CircuitBreaker; // Feature 016
-use crate::indexer::summarizer::{summary_worker, SummarizerConfig};
 use crate::indexer::{
     load_config, start_watcher, EmbedderPool, GoferConfig, IndexTask, IndexerService,
 };
@@ -217,7 +216,7 @@ pub struct ProjectState {
     pub path: PathBuf,
     pub name: String,
     pub sqlite: SqliteStorage,
-    pub lance: Arc<Mutex<LanceStorage>>,
+    pub lance: Arc<LanceStorage>,
     pub task_tx: mpsc::Sender<IndexTask>,
     pub language_services: Arc<Vec<Box<dyn LanguageService>>>,
     /// Whether a file watcher is active
@@ -277,7 +276,7 @@ impl DaemonState {
             started_at: Instant::now(),
             sync_progress: Arc::new(SyncProgress::new()),
             shutdown_token: CancellationToken::new(),
-            connection_semaphore: Arc::new(Semaphore::new(256)),
+            connection_semaphore: Arc::new(Semaphore::new(1024)),
             metrics: Arc::new(DaemonMetrics::new()),
             notify_tx,
             resource_limits: Arc::new(ResourceLimits::default()), // Feature 015
@@ -344,15 +343,6 @@ impl DaemonState {
             // Continue anyway - the database may still be usable
         }
 
-        // C4: Recover summary queue items stuck in 'processing' from a previous crash
-        let recovered = sqlite.recover_summary_queue().await?;
-        if recovered > 0 {
-            tracing::info!(
-                "Recovered {} stuck summary queue items → pending",
-                recovered
-            );
-        }
-
         // C3: Invalidate chunk embedding cache if the model changed since last index
         let cache_version_key = "embedding_cache_version";
         let current_version = self.embedder.cache_version_key();
@@ -394,7 +384,7 @@ impl DaemonState {
             // Continue anyway - the database may still be usable
         }
 
-        let lance = Arc::new(Mutex::new(lance_storage));
+        let lance = Arc::new(lance_storage);
 
         let (task_tx, task_rx) = mpsc::channel::<IndexTask>(100);
 
@@ -520,16 +510,6 @@ impl DaemonState {
                     project.cancel.clone(),
                 )
                 .await?;
-        }
-
-        // Spawn summarizer background worker (if LLM enabled)
-        let summarizer_config = SummarizerConfig::from_toml(&config.summarizer);
-        if summarizer_config.enable_llm {
-            let cancel = self.shutdown_token.clone();
-            let sqlite_sum = project.sqlite.clone();
-            tokio::spawn(async move {
-                summary_worker(summarizer_config, sqlite_sum, cancel).await;
-            });
         }
 
         // Start watcher if requested

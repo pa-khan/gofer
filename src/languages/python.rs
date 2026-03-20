@@ -929,13 +929,14 @@ fn is_likely_stdlib(top_level: &str) -> bool {
 // Linter integration
 // ---------------------------------------------------------------------------
 
-fn run_linter(file_path: &Path, root: &Path) -> Result<String> {
+async fn run_linter(file_path: &Path, root: &Path) -> Result<String> {
     // Try ruff first (fast, Rust-based)
-    let ruff_result = std::process::Command::new("ruff")
+    let ruff_result = tokio::process::Command::new("ruff")
         .args(["check", "--output-format=json"])
         .arg(file_path)
         .current_dir(root)
-        .output();
+        .output()
+        .await;
 
     if let Ok(output) = ruff_result {
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -964,11 +965,12 @@ fn run_linter(file_path: &Path, root: &Path) -> Result<String> {
     }
 
     // Try flake8
-    let flake8_result = std::process::Command::new("flake8")
+    let flake8_result = tokio::process::Command::new("flake8")
         .args(["--format=json"])
         .arg(file_path)
         .current_dir(root)
-        .output();
+        .output()
+        .await;
 
     if let Ok(output) = flake8_result {
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -981,11 +983,12 @@ fn run_linter(file_path: &Path, root: &Path) -> Result<String> {
     }
 
     // Try pylint
-    let pylint_result = std::process::Command::new("pylint")
+    let pylint_result = tokio::process::Command::new("pylint")
         .args(["--output-format=json"])
         .arg(file_path)
         .current_dir(root)
-        .output();
+        .output()
+        .await;
 
     if let Ok(output) = pylint_result {
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1234,7 +1237,7 @@ impl PythonService {
 
                 // If it's a local file, show its exports (top-level names)
                 if path.exists() && path.extension().map(|e| e == "py").unwrap_or(false) {
-                    if let Ok(code) = std::fs::read_to_string(&path) {
+                    if let Ok(code) = tokio::fs::read_to_string(&path).await {
                         if let Ok((classes, functions)) = inspect_python_code(&code) {
                             if !classes.is_empty() || !functions.is_empty() {
                                 out.push_str("\n### Available names\n\n");
@@ -1283,7 +1286,7 @@ impl PythonService {
             anyhow::bail!("File not found: {}", path.display());
         }
 
-        let code = std::fs::read_to_string(&path)?;
+        let code = tokio::fs::read_to_string(&path).await?;
         let (classes, functions) = inspect_python_code(&code)?;
 
         let rel = path.strip_prefix(root).unwrap_or(&path);
@@ -1389,6 +1392,6 @@ impl PythonService {
             anyhow::bail!("File not found: {}", path.display());
         }
 
-        run_linter(&path, root)
+        run_linter(&path, root).await
     }
 }

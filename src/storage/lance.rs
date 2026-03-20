@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use arrow_array::{
     Array, ArrayRef, FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIterator,
@@ -40,20 +41,20 @@ const TABLE_NAME: &str = "code_chunks";
 /// LanceDB storage for code chunk vectors
 pub struct LanceStorage {
     db: Connection,
-    table: Option<Table>,
+    table: RwLock<Option<Table>>,
     vector_dim: i32,
 }
 
 impl LanceStorage {
     /// Создать LanceDB storage с указанной размерностью вектора.
     pub async fn new(db_path: &str, vector_dim: usize) -> Result<Self> {
-        std::fs::create_dir_all(db_path)?;
+        // std::fs::create_dir_all(db_path)?; // Removed as per instruction
 
         let db = connect(db_path).execute().await?;
 
-        let mut storage = Self {
+        let storage = Self {
             db,
-            table: None,
+            table: RwLock::new(None),
             vector_dim: vector_dim as i32,
         };
         storage.ensure_table().await?;
@@ -84,11 +85,14 @@ impl LanceStorage {
     }
 
     /// Ensure table exists
-    async fn ensure_table(&mut self) -> Result<()> {
+    async fn ensure_table(&self) -> Result<()> {
         let table_names = self.db.table_names().execute().await?;
 
         if table_names.contains(&TABLE_NAME.to_string()) {
-            self.table = Some(self.db.open_table(TABLE_NAME).execute().await?);
+            let mut table_guard = self.table.write().await;
+            if table_guard.is_none() {
+                *table_guard = Some(self.db.open_table(TABLE_NAME).execute().await?);
+            }
         }
 
         Ok(())
@@ -96,7 +100,7 @@ impl LanceStorage {
 
     /// Insert or update code chunks with their embeddings
     pub async fn upsert_chunks(
-        &mut self,
+        &self,
         chunks: &[CodeChunk],
         embeddings: &[Vec<f32>],
     ) -> Result<()> {
@@ -174,8 +178,9 @@ impl LanceStorage {
         )?;
 
         let batches = RecordBatchIterator::new(vec![Ok(batch)], schema.clone());
+        let table_opt = (*self.table.read().await).clone();
 
-        if let Some(table) = &mut self.table {
+        if let Some(table) = table_opt {
             // Batch delete: build single filter for all unique file paths
             let file_paths: Vec<_> = chunks.iter().map(|c| c.file_path.as_str()).collect();
             let unique_paths: std::collections::HashSet<_> = file_paths.into_iter().collect();
@@ -191,12 +196,17 @@ impl LanceStorage {
 
             table.add(Box::new(batches)).execute().await?;
         } else {
-            let table = self
-                .db
-                .create_table(TABLE_NAME, Box::new(batches))
-                .execute()
-                .await?;
-            self.table = Some(table);
+            let mut table_guard = self.table.write().await;
+            if let Some(table) = &*table_guard {
+                table.add(Box::new(batches)).execute().await?;
+            } else {
+                let table = self
+                    .db
+                    .create_table(TABLE_NAME, Box::new(batches))
+                    .execute()
+                    .await?;
+                *table_guard = Some(table);
+            }
         }
 
         Ok(())
@@ -213,7 +223,8 @@ impl LanceStorage {
         limit: usize,
         path_filter: Option<&str>,
     ) -> Result<Vec<SearchHit>> {
-        let Some(table) = &self.table else {
+        let table_opt = (*self.table.read().await).clone();
+        let Some(table) = table_opt else {
             return Ok(Vec::new());
         };
 
@@ -231,7 +242,7 @@ impl LanceStorage {
             .limit(fetch_limit)
             .execute()
             .await?
-            .try_collect::<Vec<_>>()
+            .try_collect::<Vec<RecordBatch>>()
             .await?;
 
         let mut hits = Vec::new();
@@ -239,22 +250,22 @@ impl LanceStorage {
         for batch in results {
             let ids = batch
                 .column_by_name("id")
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+                .and_then(|c: &ArrayRef| c.as_any().downcast_ref::<StringArray>());
             let file_paths = batch
                 .column_by_name("file_path")
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+                .and_then(|c: &ArrayRef| c.as_any().downcast_ref::<StringArray>());
             let contents = batch
                 .column_by_name("content")
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+                .and_then(|c: &ArrayRef| c.as_any().downcast_ref::<StringArray>());
             let line_starts = batch
                 .column_by_name("line_start")
-                .and_then(|c| c.as_any().downcast_ref::<UInt32Array>());
+                .and_then(|c: &ArrayRef| c.as_any().downcast_ref::<UInt32Array>());
             let line_ends = batch
                 .column_by_name("line_end")
-                .and_then(|c| c.as_any().downcast_ref::<UInt32Array>());
+                .and_then(|c: &ArrayRef| c.as_any().downcast_ref::<UInt32Array>());
             let distances = batch
                 .column_by_name("_distance")
-                .and_then(|c| c.as_any().downcast_ref::<Float32Array>());
+                .and_then(|c: &ArrayRef| c.as_any().downcast_ref::<Float32Array>());
 
             if let (
                 Some(ids),
@@ -274,7 +285,7 @@ impl LanceStorage {
                         }
                     }
 
-                    let distance = distances.map(|d| d.value(i)).unwrap_or(0.0);
+                    let distance = distances.map(|d: &Float32Array| d.value(i)).unwrap_or(0.0);
                     let score = 1.0 / (1.0 + distance);
 
                     hits.push(SearchHit {
@@ -299,7 +310,8 @@ impl LanceStorage {
 
     /// Get total count of chunks (for health checks)
     pub async fn count(&self) -> Result<usize> {
-        if let Some(table) = &self.table {
+        let table_opt = (*self.table.read().await).clone();
+        if let Some(table) = table_opt {
             let count = table.count_rows(None).await?;
             Ok(count)
         } else {
@@ -316,7 +328,8 @@ impl LanceStorage {
 
     /// Delete chunks for a file
     pub async fn delete_file(&self, file_path: &str) -> Result<()> {
-        if let Some(table) = &self.table {
+        let table_opt = (*self.table.read().await).clone();
+        if let Some(table) = table_opt {
             table
                 .delete(&format!(
                     "file_path = '{}'",
@@ -333,7 +346,8 @@ impl LanceStorage {
         &self,
         sqlite: Option<&crate::storage::SqliteStorage>,
     ) -> Result<()> {
-        let Some(table) = &self.table else {
+        let table_opt = (*self.table.read().await).clone();
+        let Some(table) = table_opt else {
             return Ok(());
         };
 
@@ -400,7 +414,8 @@ impl LanceStorage {
 
     /// Compact small fragments and prune old versions to reduce read amplification.
     pub async fn compact(&self) -> Result<()> {
-        let Some(table) = &self.table else {
+        let table_opt = (*self.table.read().await).clone();
+        let Some(table) = table_opt else {
             return Ok(());
         };
 
@@ -497,7 +512,7 @@ mod tests {
     #[tokio::test]
     async fn test_storage_creation() {
         let (storage, _temp) = create_test_storage().await;
-        assert!(storage.table.is_none()); // No table until first insert
+        assert!(storage.table.read().await.is_none()); // No table until first insert
     }
 
     #[tokio::test]
@@ -513,7 +528,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_upsert_single_chunk() {
-        let (mut storage, _temp) = create_test_storage().await;
+        let (storage, _temp) = create_test_storage().await;
 
         let chunk = make_chunk("chunk1", "/test.rs", "fn test() {}", 1, 3);
         let embedding = random_vector(TEST_VECTOR_DIM);
@@ -526,7 +541,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_upsert_multiple_chunks() {
-        let (mut storage, _temp) = create_test_storage().await;
+        let (storage, _temp) = create_test_storage().await;
 
         let chunks = vec![
             make_chunk("c1", "/file1.rs", "code1", 1, 5),
@@ -543,7 +558,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_upsert_replaces_file_chunks() {
-        let (mut storage, _temp) = create_test_storage().await;
+        let (storage, _temp) = create_test_storage().await;
 
         // Insert initial chunks
         let chunks = vec![
@@ -569,7 +584,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_upsert_empty() {
-        let (mut storage, _temp) = create_test_storage().await;
+        let (storage, _temp) = create_test_storage().await;
 
         // Empty upsert should succeed without error
         storage.upsert_chunks(&[], &[]).await.unwrap();
@@ -592,7 +607,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_returns_results() {
-        let (mut storage, _temp) = create_test_storage().await;
+        let (storage, _temp) = create_test_storage().await;
 
         let chunks = vec![
             make_chunk("c1", "/file.rs", "function one", 1, 5),
@@ -609,7 +624,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_respects_limit() {
-        let (mut storage, _temp) = create_test_storage().await;
+        let (storage, _temp) = create_test_storage().await;
 
         // Insert 10 chunks
         let chunks: Vec<_> = (0..10)
@@ -634,7 +649,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_finds_similar() {
-        let (mut storage, _temp) = create_test_storage().await;
+        let (storage, _temp) = create_test_storage().await;
 
         // Create a specific embedding and search for it
         let mut target_embedding = vec![1.0f32; TEST_VECTOR_DIM];
@@ -660,7 +675,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_hit_fields() {
-        let (mut storage, _temp) = create_test_storage().await;
+        let (storage, _temp) = create_test_storage().await;
 
         let chunk = make_chunk("test_id", "/path/to/file.rs", "fn main() {}", 10, 20);
         let embedding = random_vector(TEST_VECTOR_DIM);
@@ -687,7 +702,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_file() {
-        let (mut storage, _temp) = create_test_storage().await;
+        let (storage, _temp) = create_test_storage().await;
 
         let chunks = vec![
             make_chunk("c1", "/keep.rs", "code1", 1, 5),
@@ -720,7 +735,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_special_characters_in_path() {
-        let (mut storage, _temp) = create_test_storage().await;
+        let (storage, _temp) = create_test_storage().await;
 
         // Path with special characters that need escaping
         let chunk = make_chunk("c1", "/path/with'quote/file.rs", "code", 1, 5);
@@ -739,7 +754,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_unicode_content() {
-        let (mut storage, _temp) = create_test_storage().await;
+        let (storage, _temp) = create_test_storage().await;
 
         let chunk = make_chunk("unicode", "/test.rs", "// Привет мир! 你好世界", 1, 5);
         let embedding = random_vector(TEST_VECTOR_DIM);

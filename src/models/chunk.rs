@@ -405,40 +405,7 @@ pub struct FrontendApiCallInfo {
     pub line: Option<i32>,
 }
 
-// === Summarization Types ===
 
-/// File summary for semantic search enhancement
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-pub struct FileSummary {
-    pub id: i64,
-    pub file_id: i64,
-    pub summary: String,
-    pub summary_source: String, // 'llm', 'docstring', 'comment'
-    pub model_name: Option<String>,
-    pub confidence: Option<f64>,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-/// Summary with file path (for queries)
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-pub struct FileSummaryWithPath {
-    pub id: i64,
-    pub file_path: String,
-    pub summary: String,
-    pub summary_source: String,
-}
-
-/// Summary queue item
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-pub struct SummaryQueueItem {
-    pub id: i64,
-    pub file_id: i64,
-    pub priority: i32,
-    pub status: String,
-    pub error_message: Option<String>,
-    pub created_at: i64,
-}
 
 // === Structural Fingerprinting Types ===
 

@@ -18,7 +18,7 @@ pub async fn dispatch(name: &str, args: Value, ctx: &ToolContext) -> Result<Valu
         "get_dependencies" => project::tool_get_dependencies(args, ctx).await,
         "dependency_impact" => project::tool_dependency_impact(args, ctx).await,
         "get_errors" => diagnostics::tool_get_errors(args, ctx).await,
-        "run_diagnostics" => diagnostics::tool_run_diagnostics(ctx).await,
+        "run_diagnostics" => diagnostics::tool_run_diagnostics(args, ctx).await,
         "get_config_keys" => diagnostics::tool_get_config_keys(ctx).await,
         "get_vue_tree" => project::tool_get_vue_tree(args, ctx).await,
         "git_blame" => git::tool_git_blame(args, ctx).await,
@@ -200,8 +200,16 @@ pub fn core_tools_list() -> Vec<Value> {
         }),
         json!({
             "name": "run_diagnostics",
-            "description": "Run cargo check and/or tsc to refresh compiler diagnostics.",
-            "inputSchema": { "type": "object", "properties": {} }
+            "description": "Run cargo check and/or tsc to refresh compiler diagnostics. You can pass options for cargo check to target specific workspaces, packages, or all targets.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workspace": { "type": "boolean", "description": "Check all packages in the workspace (cargo check --workspace)" },
+                    "all_targets": { "type": "boolean", "description": "Check all targets (cargo check --all-targets) including tests and benches" },
+                    "package": { "type": "string", "description": "Package to check (cargo check -p <package>)" },
+                    "manifest_path": { "type": "string", "description": "Path to Cargo.toml (cargo check --manifest-path <path>)" }
+                }
+            }
         }),
         json!({
             "name": "git_blame",
@@ -363,7 +371,15 @@ pub fn core_tools_list() -> Vec<Value> {
         json!({
             "name": "run_check",
             "description": "Run compiler/linter checks (cargo check, tsc) and return fresh diagnostics without modifying any files.",
-            "inputSchema": { "type": "object", "properties": {} }
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workspace": { "type": "boolean", "description": "Check all packages in the workspace (cargo check --workspace)" },
+                    "all_targets": { "type": "boolean", "description": "Check all targets (cargo check --all-targets) including tests and benches" },
+                    "package": { "type": "string", "description": "Package to check (cargo check -p <package>)" },
+                    "manifest_path": { "type": "string", "description": "Path to Cargo.toml (cargo check --manifest-path <path>)" }
+                }
+            }
         }),
         json!({
             "name": "grep",

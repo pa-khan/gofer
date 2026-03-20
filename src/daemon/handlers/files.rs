@@ -409,19 +409,12 @@ pub async fn tool_context_bundle(args: Value, ctx: &ToolContext) -> Result<Value
         return Err(GoferError::InvalidParams(format!("File not found: {}", file)).into());
     }
 
-    let bundle = tokio::task::spawn_blocking({
-        let file_path = file_path.clone();
-        move || {
-            let mut bundle = crate::indexer::context::create_bundle(&file_path, depth);
-            if skeleton {
-                crate::indexer::context::skeletonize_bundle(&mut bundle);
-            } else if skeleton_deps_only {
-                crate::indexer::context::skeletonize_deps_only(&mut bundle);
-            }
-            bundle
-        }
-    })
-    .await?;
+    let mut bundle = crate::indexer::context::create_bundle(file_path, depth).await;
+    if skeleton {
+        crate::indexer::context::skeletonize_bundle(&mut bundle);
+    } else if skeleton_deps_only {
+        crate::indexer::context::skeletonize_deps_only(&mut bundle);
+    }
 
     let mode = if skeleton {
         "skeleton"
@@ -468,41 +461,48 @@ pub async fn tool_find_files(args: Value, ctx: &ToolContext) -> Result<Value> {
         }));
     }
 
-    let mut files = Vec::new();
+    let pat_string = pat.to_string();
+    let ctx_root_path = ctx.root_path.clone();
+    
+    let files = tokio::task::spawn_blocking(move || {
+        let mut files = Vec::new();
 
-    // Parse glob pattern
-    let glob_pattern = glob::Pattern::new(pat)
-        .map_err(|e| GoferError::InvalidParams(format!("Invalid glob pattern: {}", e)))?;
+        // Parse glob pattern inside block
+        let glob_pattern = glob::Pattern::new(&pat_string)
+            .map_err(|e| format!("Invalid glob pattern: {}", e))?;
 
-    // Use WalkDir for traversal
-    let walker = WalkDir::new(&search_root).into_iter();
+        // Use WalkDir for traversal
+        let walker = WalkDir::new(&search_root).into_iter();
 
-    for entry in walker.filter_map(|e| e.ok()) {
-        if !entry.file_type().is_file() {
-            continue;
+        for entry in walker.filter_map(|e| e.ok()) {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+
+            // Skip .git directories
+            if entry.path().to_string_lossy().contains("/.git/") {
+                continue;
+            }
+
+            // Get relative path from search_root for pattern matching
+            let relative_to_search = entry
+                .path()
+                .strip_prefix(&search_root)
+                .ok()
+                .and_then(|p| p.to_str())
+                .unwrap_or("");
+
+            // Match against glob pattern
+            if glob_pattern.matches(relative_to_search) {
+                files.push(make_relative(
+                    &ctx_root_path,
+                    entry.path().to_str().unwrap_or(""),
+                ));
+            }
         }
-
-        // Skip .git directories
-        if entry.path().to_string_lossy().contains("/.git/") {
-            continue;
-        }
-
-        // Get relative path from search_root for pattern matching
-        let relative_to_search = entry
-            .path()
-            .strip_prefix(&search_root)
-            .ok()
-            .and_then(|p| p.to_str())
-            .unwrap_or("");
-
-        // Match against glob pattern
-        if glob_pattern.matches(relative_to_search) {
-            files.push(make_relative(
-                &ctx.root_path,
-                entry.path().to_str().unwrap_or(""),
-            ));
-        }
-    }
+        Ok::<_, String>(files)
+    }).await.map_err(|e| GoferError::Internal(anyhow::anyhow!("Task panic: {}", e)))?
+      .map_err(|e| GoferError::Internal(anyhow::anyhow!(e)))?;
 
     Ok(json!({
         "pattern": pat,
@@ -541,49 +541,56 @@ pub async fn tool_grep(args: Value, ctx: &ToolContext) -> Result<Value> {
         ctx.root_path.as_ref().clone()
     };
 
-    let mut file_matches: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
-    let mut count = 0;
+    let glob_filter_string = glob_filter.map(|s| s.to_string());
+    let ctx_root_path = ctx.root_path.clone();
 
-    let walker = WalkDir::new(&search_root).into_iter();
+    let (file_matches, count) = tokio::task::spawn_blocking(move || {
+        let mut file_matches: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        let mut count = 0;
 
-    let glob_pat = glob_filter.and_then(|g| glob::Pattern::new(g).ok());
+        let walker = WalkDir::new(&search_root).into_iter();
 
-    for entry in walker.filter_map(|e| e.ok()) {
-        if !entry.file_type().is_file() {
-            continue;
-        }
+        let glob_pat = glob_filter_string.and_then(|g| glob::Pattern::new(&g).ok());
 
-        if entry.path().to_string_lossy().contains("/.git/") {
-            continue;
-        }
-
-        if let Some(ref gp) = glob_pat {
-            if !gp.matches_path(entry.path()) {
+        for entry in walker.filter_map(|e| e.ok()) {
+            if !entry.file_type().is_file() {
                 continue;
             }
-        }
 
-        if let Ok(content) = std::fs::read_to_string(entry.path()) {
-            let mut file_hits = Vec::new();
-            for (i, line) in content.lines().enumerate() {
-                if re.is_match(line) {
-                    file_hits.push(format!("{}: {}", i + 1, line.trim()));
-                    count += 1;
-                    if count >= max_results {
-                        break;
-                    }
+            if entry.path().to_string_lossy().contains("/.git/") {
+                continue;
+            }
+
+            if let Some(ref gp) = glob_pat {
+                if !gp.matches_path(entry.path()) {
+                    continue;
                 }
             }
-            if !file_hits.is_empty() {
-                let rel_path = make_relative(&ctx.root_path, entry.path().to_str().unwrap_or(""));
-                file_matches.insert(rel_path, file_hits);
+
+            if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                let mut file_hits = Vec::new();
+                for (i, line) in content.lines().enumerate() {
+                    if re.is_match(line) {
+                        file_hits.push(format!("{}: {}", i + 1, line.trim()));
+                        count += 1;
+                        if count >= max_results {
+                            break;
+                        }
+                    }
+                }
+                if !file_hits.is_empty() {
+                    let rel_path = make_relative(&ctx_root_path, entry.path().to_str().unwrap_or(""));
+                    file_matches.insert(rel_path, file_hits);
+                }
+            }
+            if count >= max_results {
+                break;
             }
         }
-        if count >= max_results {
-            break;
-        }
-    }
+        Ok::<_, String>((file_matches, count))
+    }).await.map_err(|e| GoferError::Internal(anyhow::anyhow!("Task panic: {}", e)))?
+      .map_err(|e| GoferError::Internal(anyhow::anyhow!(e)))?;
 
     Ok(json!({
         "pattern": pat,

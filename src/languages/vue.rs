@@ -1078,7 +1078,7 @@ impl VueService {
         let mut usages: Vec<(String, Vec<String>)> = Vec::new();
 
         for file_path in &vue_files {
-            let Ok(content) = std::fs::read_to_string(file_path) else {
+            let Ok(content) = tokio::fs::read_to_string(file_path).await else {
                 continue;
             };
 
@@ -1319,7 +1319,7 @@ impl VueService {
         let mut store_count = 0;
 
         for file_path in &ts_files {
-            let Ok(content) = std::fs::read_to_string(file_path) else {
+            let Ok(content) = tokio::fs::read_to_string(file_path).await else {
                 continue;
             };
 
