@@ -33,7 +33,7 @@ pub async fn tool_format_file(args: Value, ctx: &ToolContext) -> Result<Value> {
 
     let formatter = args.get("formatter").and_then(|v| v.as_str());
 
-    let abs_path = resolve_path_buf(&ctx.root_path, path);
+    let abs_path = resolve_path_buf(&ctx.root_path, path)?;
 
     if !abs_path.exists() {
         return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
@@ -104,7 +104,7 @@ pub async fn tool_lint_file(args: Value, ctx: &ToolContext) -> Result<Value> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
-    let abs_path = resolve_path_buf(&ctx.root_path, path);
+    let abs_path = resolve_path_buf(&ctx.root_path, path)?;
 
     if !abs_path.exists() {
         return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
@@ -172,7 +172,7 @@ pub async fn tool_apply_lint_fix(args: Value, ctx: &ToolContext) -> Result<Value
         .and_then(|v| v.as_str())
         .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
-    let abs_path = resolve_path_buf(&ctx.root_path, path);
+    let abs_path = resolve_path_buf(&ctx.root_path, path)?;
 
     if !abs_path.exists() {
         return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());

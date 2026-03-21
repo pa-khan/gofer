@@ -61,8 +61,14 @@ pub async fn tool_run_diagnostics(args: Value, ctx: &ToolContext) -> Result<Valu
     let options = CargoCheckOptions {
         workspace: args.get("workspace").and_then(|v| v.as_bool()),
         all_targets: args.get("all_targets").and_then(|v| v.as_bool()),
-        package: args.get("package").and_then(|v| v.as_str()).map(String::from),
-        manifest_path: args.get("manifest_path").and_then(|v| v.as_str()).map(String::from),
+        package: args
+            .get("package")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        manifest_path: args
+            .get("manifest_path")
+            .and_then(|v| v.as_str())
+            .map(String::from),
     };
 
     let result = diagnostics::run_diagnostics(&ctx.root_path, &ctx.sqlite, options).await?;

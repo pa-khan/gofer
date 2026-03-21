@@ -79,7 +79,7 @@ pub async fn tool_delete_safe(args: Value, ctx: &ToolContext) -> Result<Value> {
         })
         .unwrap_or_default();
 
-    let abs_path = resolve_path_buf(&ctx.root_path, path);
+    let abs_path = resolve_path_buf(&ctx.root_path, path)?;
 
     if !abs_path.exists() {
         return Err(GoferError::InvalidParams(format!("Path not found: {}", path)).into());
@@ -202,9 +202,9 @@ pub async fn tool_restore(args: Value, ctx: &ToolContext) -> Result<Value> {
     let metadata = TrashMetadata::load(&trash_root, deletion_uuid).await?;
 
     let restore_path = if let Some(target) = target_path {
-        resolve_path_buf(&ctx.root_path, target)
+        resolve_path_buf(&ctx.root_path, target)?
     } else {
-        resolve_path_buf(&ctx.root_path, &metadata.original_path)
+        resolve_path_buf(&ctx.root_path, &metadata.original_path)?
     };
 
     // Check for conflict

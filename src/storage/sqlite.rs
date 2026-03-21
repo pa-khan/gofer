@@ -8,9 +8,8 @@ use thiserror::Error;
 
 use crate::models::{
     ActiveError, ApiEndpointInfo, ConfigKey, CrossStackLink, Dependency, DependencyUsage,
-    DependencyUsageInfo, FrontendApiCallInfo, IndexedFile,
-    ReferenceWithPath, Rule, Symbol, SymbolReference, SymbolWithPath,
-    TypeFingerprint, VueTree,
+    DependencyUsageInfo, FrontendApiCallInfo, IndexedFile, ReferenceWithPath, Rule, Symbol,
+    SymbolReference, SymbolWithPath, TypeFingerprint, VueTree,
 };
 
 #[derive(Error, Debug)]
@@ -1415,8 +1414,6 @@ impl SqliteStorage {
 
         Ok(calls)
     }
-
-
 
     // === Type Fingerprints Operations ===
 

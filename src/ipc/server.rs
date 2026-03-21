@@ -505,13 +505,13 @@ async fn handle_summary_stats(
 
     match state.get_or_load_project(project_path).await {
         Ok(_) => DaemonResponse::success(
-                id,
-                json!({
-                    "pending": 0,
-                    "processing": 0,
-                    "failed": 0,
-                }),
-            ),
+            id,
+            json!({
+                "pending": 0,
+                "processing": 0,
+                "failed": 0,
+            }),
+        ),
         Err(e) => DaemonResponse::error(id, -32000, format!("Project load failed: {}", e)),
     }
 }

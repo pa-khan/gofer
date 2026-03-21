@@ -17,9 +17,9 @@ fn log_bridge(msg: &str) {
 }
 
 /// Sentinel IDs for internal bridge requests — filtered from client output.
-const ROOTS_LIST_ID: &str = "__gofer_roots__";
-const REGISTER_ID: &str = "__gofer_register__";
-const ACTIVATE_ID: &str = "__gofer_activate__";
+const ROOTS_LIST_ID: u64 = 999999;
+const REGISTER_ID: u64 = 999998;
+const ACTIVATE_ID: u64 = 999997;
 
 /// Run the MCP bridge: stdin <-> daemon socket.
 ///
@@ -101,6 +101,14 @@ pub async fn run_bridge(fallback_path: PathBuf, socket_path: &Path) -> Result<()
                                     continue;
                                 }
 
+                                // ── Filter out other responses from client ──
+                                // If msg does not have a method, it is a response from the client
+                                // We MUST NOT forward client responses to the daemon.
+                                if method.is_empty() {
+                                    log_bridge(&format!("swallowing client response: id={:?}", msg_id));
+                                    continue;
+                                }
+
                                 // ── Default: inject project_path, forward ──
                                 log_bridge(&format!("forwarding to daemon: method={}, id={:?}", method, msg_id));
                                 inject_project_path(&mut msg, &project_path);
@@ -156,10 +164,10 @@ pub async fn run_bridge(fallback_path: PathBuf, socket_path: &Path) -> Result<()
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Check whether a JSON-RPC `id` field matches a bridge sentinel string.
-fn is_bridge_id(id: &Option<Value>, sentinel: &str) -> bool {
+/// Check whether a JSON-RPC `id` field matches a bridge sentinel u64.
+fn is_bridge_id(id: &Option<Value>, sentinel: u64) -> bool {
     id.as_ref()
-        .and_then(|v| v.as_str())
+        .and_then(|v| v.as_u64())
         .map(|s| s == sentinel)
         .unwrap_or(false)
 }

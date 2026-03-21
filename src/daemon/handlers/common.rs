@@ -67,13 +67,52 @@ pub fn resolve_path(root: &Path, file: &str) -> String {
     }
 }
 
-/// Резолвинг пути в PathBuf для file operations
-pub fn resolve_path_buf(root: &Path, file: &str) -> PathBuf {
+use std::path::Component;
+
+/// Normalize a path (lexically resolve ".." and ".")
+pub fn normalize_path(path: &Path) -> PathBuf {
+    let mut components = path.components().peekable();
+    let mut ret = if let Some(c @ Component::Prefix(..)) = components.peek().cloned() {
+        components.next();
+        PathBuf::from(c.as_os_str())
+    } else {
+        PathBuf::new()
+    };
+
+    for component in components {
+        match component {
+            Component::Prefix(..) => unreachable!(),
+            Component::RootDir => {
+                ret.push(component.as_os_str());
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let _ = ret.pop();
+            }
+            Component::Normal(c) => {
+                ret.push(c);
+            }
+        }
+    }
+    ret
+}
+
+/// Securely resolve path, preventing Path Traversal
+pub fn resolve_path_buf(root: &Path, file: &str) -> anyhow::Result<PathBuf> {
     let p = Path::new(file);
-    if p.is_absolute() {
+    let absolute = if p.is_absolute() {
         p.to_path_buf()
     } else {
-        root.join(file)
+        root.join(p)
+    };
+
+    let normalized = normalize_path(&absolute);
+    let normalized_root = normalize_path(root);
+
+    if normalized.starts_with(&normalized_root) {
+        Ok(normalized)
+    } else {
+        Err(anyhow::anyhow!("Path traversal attempt blocked: {}", file))
     }
 }
 

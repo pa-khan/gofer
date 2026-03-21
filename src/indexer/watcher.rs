@@ -83,7 +83,6 @@ impl Default for EmbeddingConfig {
     }
 }
 
-
 /// Load gofer configuration from .gofer/config.toml
 pub fn load_config(gofer_dir: &Path) -> GoferConfig {
     let config_path = gofer_dir.join("config.toml");

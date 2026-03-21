@@ -9,7 +9,9 @@ use crate::indexer::parser::{self, CodeParser, SupportedLanguage};
 use crate::models::{ContextBundle, DependencyFile};
 
 pub async fn create_bundle(main_path: &Path, max_depth: u32) -> ContextBundle {
-    let main_content = tokio::fs::read_to_string(main_path).await.unwrap_or_default();
+    let main_content = tokio::fs::read_to_string(main_path)
+        .await
+        .unwrap_or_default();
     let mut dependencies = Vec::new();
     let mut visited = HashSet::new();
     visited.insert(main_path.canonicalize().unwrap_or(main_path.to_path_buf()));
@@ -30,7 +32,8 @@ pub async fn create_bundle(main_path: &Path, max_depth: u32) -> ContextBundle {
                         &mut visited,
                         max_depth,
                         1,
-                    ).await;
+                    )
+                    .await;
                 }
             }
         }
@@ -65,101 +68,102 @@ fn resolve_import<'a>(
             .trim_start_matches("./")
             .trim_start_matches("@/");
 
-    let extensions: &[&str] = match language {
-        SupportedLanguage::Rust => &["rs"],
-        SupportedLanguage::TypeScript => &["ts", "tsx", "js", "jsx"],
-        SupportedLanguage::JavaScript => &["js", "jsx", "ts", "tsx"],
-        SupportedLanguage::Vue => &["vue", "ts", "js"],
-        SupportedLanguage::Python => &["py"],
-        SupportedLanguage::Go => &["go"],
-    };
+        let extensions: &[&str] = match language {
+            SupportedLanguage::Rust => &["rs"],
+            SupportedLanguage::TypeScript => &["ts", "tsx", "js", "jsx"],
+            SupportedLanguage::JavaScript => &["js", "jsx", "ts", "tsx"],
+            SupportedLanguage::Vue => &["vue", "ts", "js"],
+            SupportedLanguage::Python => &["py"],
+            SupportedLanguage::Go => &["go"],
+        };
 
-    // 1. Прямой путь: base_dir/normalized.ext
-    for ext in extensions {
-        let candidate = base_dir.join(normalized).with_added_extension(ext);
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-
-    // 2. Index файл: base_dir/normalized/index.ext
-    for ext in extensions {
-        let candidate = base_dir
-            .join(normalized)
-            .join("index")
-            .with_added_extension(ext);
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-
-    // 3. Vue/TS `@/` alias → ищем tsconfig.json paths или src/
-    if import_path.starts_with("@/") {
-        let rel_path = import_path.trim_start_matches("@/");
-
-        // Попробовать найти tsconfig.json и прочитать paths
-        if let Some(resolved) = resolve_tsconfig_paths(import_path, base_dir, extensions).await {
-            return Some(resolved);
-        }
-
-        // Fallback: @/ → src/
-        let src_path = base_dir
-            .ancestors()
-            .find(|p| p.join("src").exists())
-            .map(|p| p.join("src"));
-
-        if let Some(src) = src_path {
-            for ext in extensions {
-                let candidate = src.join(rel_path).with_added_extension(ext);
-                if candidate.exists() {
-                    return Some(candidate);
-                }
-            }
-            for ext in extensions {
-                let candidate = src.join(rel_path).join("index").with_added_extension(ext);
-                if candidate.exists() {
-                    return Some(candidate);
-                }
-            }
-        }
-    }
-
-    // 4. Python relative imports (from ..foo import bar → base_dir/../../foo.py)
-    if language == SupportedLanguage::Python && import_path.starts_with('.') {
-        let dots = import_path.chars().take_while(|c| *c == '.').count();
-        let module = &import_path[dots..];
-        let mut target_dir = base_dir.to_path_buf();
-        for _ in 1..dots {
-            target_dir = target_dir.parent().unwrap_or(base_dir).to_path_buf();
-        }
-        let module_path = module.replace('.', "/");
-        if !module_path.is_empty() {
-            // Файл
-            let candidate = target_dir.join(&module_path).with_added_extension("py");
-            if candidate.exists() {
-                return Some(candidate);
-            }
-            // Пакет
-            let candidate = target_dir.join(&module_path).join("__init__.py");
+        // 1. Прямой путь: base_dir/normalized.ext
+        for ext in extensions {
+            let candidate = base_dir.join(normalized).with_added_extension(ext);
             if candidate.exists() {
                 return Some(candidate);
             }
         }
-    }
 
-    // 5. Rust mod tree: base_dir/name.rs или base_dir/name/mod.rs
-    if language == SupportedLanguage::Rust && !normalized.contains('/') {
-        let candidate = base_dir.join(normalized).with_added_extension("rs");
-        if candidate.exists() {
-            return Some(candidate);
+        // 2. Index файл: base_dir/normalized/index.ext
+        for ext in extensions {
+            let candidate = base_dir
+                .join(normalized)
+                .join("index")
+                .with_added_extension(ext);
+            if candidate.exists() {
+                return Some(candidate);
+            }
         }
-        let candidate = base_dir.join(normalized).join("mod.rs");
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
 
-    None
+        // 3. Vue/TS `@/` alias → ищем tsconfig.json paths или src/
+        if import_path.starts_with("@/") {
+            let rel_path = import_path.trim_start_matches("@/");
+
+            // Попробовать найти tsconfig.json и прочитать paths
+            if let Some(resolved) = resolve_tsconfig_paths(import_path, base_dir, extensions).await
+            {
+                return Some(resolved);
+            }
+
+            // Fallback: @/ → src/
+            let src_path = base_dir
+                .ancestors()
+                .find(|p| p.join("src").exists())
+                .map(|p| p.join("src"));
+
+            if let Some(src) = src_path {
+                for ext in extensions {
+                    let candidate = src.join(rel_path).with_added_extension(ext);
+                    if candidate.exists() {
+                        return Some(candidate);
+                    }
+                }
+                for ext in extensions {
+                    let candidate = src.join(rel_path).join("index").with_added_extension(ext);
+                    if candidate.exists() {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+
+        // 4. Python relative imports (from ..foo import bar → base_dir/../../foo.py)
+        if language == SupportedLanguage::Python && import_path.starts_with('.') {
+            let dots = import_path.chars().take_while(|c| *c == '.').count();
+            let module = &import_path[dots..];
+            let mut target_dir = base_dir.to_path_buf();
+            for _ in 1..dots {
+                target_dir = target_dir.parent().unwrap_or(base_dir).to_path_buf();
+            }
+            let module_path = module.replace('.', "/");
+            if !module_path.is_empty() {
+                // Файл
+                let candidate = target_dir.join(&module_path).with_added_extension("py");
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+                // Пакет
+                let candidate = target_dir.join(&module_path).join("__init__.py");
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+            }
+        }
+
+        // 5. Rust mod tree: base_dir/name.rs или base_dir/name/mod.rs
+        if language == SupportedLanguage::Rust && !normalized.contains('/') {
+            let candidate = base_dir.join(normalized).with_added_extension("rs");
+            if candidate.exists() {
+                return Some(candidate);
+            }
+            let candidate = base_dir.join(normalized).join("mod.rs");
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+
+        None
     })
 }
 
@@ -233,50 +237,53 @@ fn collect_dependency<'a>(
     current_depth: u32,
 ) -> core::pin::Pin<Box<dyn core::future::Future<Output = ()> + Send + 'a>> {
     Box::pin(async move {
-    let canonical = path.canonicalize().unwrap_or(path.to_path_buf());
-    if visited.contains(&canonical) || current_depth > max_depth {
-        return;
-    }
-    visited.insert(canonical.clone());
-
-    let content = match tokio::fs::read_to_string(path).await {
-        Ok(c) => c,
-        Err(_) => {
-            visited.remove(&canonical);
+        let canonical = path.canonicalize().unwrap_or(path.to_path_buf());
+        if visited.contains(&canonical) || current_depth > max_depth {
             return;
         }
-    };
+        visited.insert(canonical.clone());
 
-    deps.push(DependencyFile {
-        path: path.to_string_lossy().to_string(),
-        content: content.clone(),
-        reason: format!("imports: {}", reason),
-        depth: current_depth,
-    });
+        let content = match tokio::fs::read_to_string(path).await {
+            Ok(c) => c,
+            Err(_) => {
+                visited.remove(&canonical);
+                return;
+            }
+        };
 
-    if current_depth < max_depth {
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if let Some(language) = SupportedLanguage::from_extension(ext) {
-            let mut parser = CodeParser::new();
-            let imports = parser.parse_imports(&content, language);
-            let base_dir = path.parent().unwrap_or(Path::new("."));
+        deps.push(DependencyFile {
+            path: path.to_string_lossy().to_string(),
+            content: content.clone(),
+            reason: format!("imports: {}", reason),
+            depth: current_depth,
+        });
 
-            for import in imports {
-                if import.is_relative {
-                    if let Some(resolved) = resolve_import(&import.path, base_dir, language).await {
-                        collect_dependency(
-                            &resolved,
-                            &import.items.join(", "),
-                            deps,
-                            visited,
-                            max_depth,
-                            current_depth + 1,
-                        ).await;
+        if current_depth < max_depth {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if let Some(language) = SupportedLanguage::from_extension(ext) {
+                let mut parser = CodeParser::new();
+                let imports = parser.parse_imports(&content, language);
+                let base_dir = path.parent().unwrap_or(Path::new("."));
+
+                for import in imports {
+                    if import.is_relative {
+                        if let Some(resolved) =
+                            resolve_import(&import.path, base_dir, language).await
+                        {
+                            collect_dependency(
+                                &resolved,
+                                &import.items.join(", "),
+                                deps,
+                                visited,
+                                max_depth,
+                                current_depth + 1,
+                            )
+                            .await;
+                        }
                     }
                 }
             }
         }
-    }
     })
 }
 

@@ -4,7 +4,7 @@
 //! Connected via bounded tokio::mpsc channels with backpressure.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -18,7 +18,6 @@ use tokio_util::sync::CancellationToken;
 use super::domains::{detect_domain, DomainConfig};
 use super::embedder::EmbedderPool;
 use super::parser::{CodeParser, SupportedLanguage};
-use super::watcher::scan_directory;
 use crate::daemon::state::SyncProgress;
 use crate::models::{CodeChunk, ImportInfo, Symbol, SymbolReference};
 use crate::storage::{LanceStorage, SqliteStorage};
@@ -96,8 +95,7 @@ const MAX_FILE_SIZE_BYTES: u64 = 2 * 1024 * 1024; // 2MB max file size for index
 ///
 /// Uses Arc-based sharing — no ownership transfer, no loss on error.
 pub async fn run_pipeline(
-    root: &Path,
-    extra_ignores: &[String],
+    files: Vec<PathBuf>,
     sqlite: SqliteStorage,
     lance: Arc<LanceStorage>,
     embedder: Arc<EmbedderPool>,
@@ -135,14 +133,11 @@ pub async fn run_pipeline(
 
     // --- Spawn stages ---
 
-    let root_owned = root.to_path_buf();
-    let ignores_owned = extra_ignores.to_vec();
     let prog_scanner = progress.clone();
     let cancel_scanner = cancel.clone();
     let h_scanner = tokio::spawn(async move {
         scanner_stage(
-            root_owned,
-            ignores_owned,
+            files,
             existing_hashes,
             scan_tx,
             prog_scanner,
@@ -268,14 +263,12 @@ pub async fn run_pipeline(
 // ---------------------------------------------------------------------------
 
 async fn scanner_stage(
-    root: PathBuf,
-    extra_ignores: Vec<String>,
+    files: Vec<PathBuf>,
     existing_hashes: HashMap<String, (String, i64)>,
     tx: mpsc::Sender<ScannedFile>,
     progress: Option<Arc<SyncProgress>>,
     cancel: CancellationToken,
 ) -> anyhow::Result<usize> {
-    let files = scan_directory(&root, &extra_ignores);
     let total = files.len();
     tracing::info!("Scanner: found {} files", total);
 
@@ -892,34 +885,43 @@ async fn writer_stage(
             batch.metadata.len()
         );
 
+        let mut lance_success = true;
         // Write chunks+embeddings to LanceDB immediately
         if !batch.chunks.is_empty() {
             tracing::debug!("Writer: writing {} chunks to LanceDB", batch.chunks.len());
-            if let Err(e) = lance
-                .upsert_chunks(&batch.chunks, &batch.embeddings)
-                .await
-            {
-                tracing::error!("Writer: LanceDB error: {}", e);
+            if let Err(e) = lance.upsert_chunks(&batch.chunks, &batch.embeddings).await {
+                tracing::error!(
+                    "Writer: LanceDB error: {}. Skipping SQLite metadata to avoid split-brain.",
+                    e
+                );
+                lance_success = false;
             } else {
                 tracing::debug!(
                     "Writer: successfully wrote {} chunks to LanceDB",
                     batch.chunks.len()
                 );
-            }
-            total_chunks += batch.chunks.len();
-        }
-
-        // 0. Update progress eagerly!
-        let metadata_count = batch.metadata.len();
-        if metadata_count > 0 {
-            total_files += metadata_count;
-            if let Some(ref p) = progress {
-                p.files_written.store(total_files, Ordering::Relaxed);
+                total_chunks += batch.chunks.len();
             }
         }
 
-        // Accumulate metadata for batched SQLite write
-        pending_metadata.extend(batch.metadata);
+        if lance_success {
+            // 0. Update progress eagerly!
+            let metadata_count = batch.metadata.len();
+            if metadata_count > 0 {
+                total_files += metadata_count;
+                if let Some(ref p) = progress {
+                    p.files_written.store(total_files, Ordering::Relaxed);
+                }
+            }
+
+            // Accumulate metadata for batched SQLite write
+            pending_metadata.extend(batch.metadata);
+        } else {
+            tracing::warn!(
+                "Writer: Skipped {} files due to LanceDB error",
+                batch.metadata.len()
+            );
+        }
 
         // Flush to SQLite when batch size reached
         if pending_metadata.len() >= SQLITE_FLUSH_SIZE {
@@ -1206,8 +1208,6 @@ async fn flush_sqlite_batch(
         tracing::error!("Writer: transaction commit failed: {}", e);
         return;
     }
-
-
 
     // Push to shared collection (outside transaction scope)
     let mut coll = collected.lock().await;

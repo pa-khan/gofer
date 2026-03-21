@@ -24,7 +24,7 @@ pub async fn tool_project_tree(args: Value, ctx: &ToolContext) -> Result<Value> 
         let root_path = root_path.clone();
         let ctx_root_path = ctx.root_path.clone();
         let pattern_string = pattern.map(|s| s.to_string());
-        
+
         move || {
             let mut tree = Vec::new();
             let walker = WalkDir::new(&root_path)
@@ -68,8 +68,10 @@ pub async fn tool_project_tree(args: Value, ctx: &ToolContext) -> Result<Value> 
             }
             Ok::<_, String>(tree)
         }
-    }).await.map_err(|e| GoferError::Internal(anyhow::anyhow!("Task panic: {}", e)))?
-      .map_err(|e| GoferError::Internal(anyhow::anyhow!(e)))?;
+    })
+    .await
+    .map_err(|e| GoferError::Internal(anyhow::anyhow!("Task panic: {}", e)))?
+    .map_err(|e| GoferError::Internal(anyhow::anyhow!(e)))?;
 
     Ok(json!({
         "root": path,

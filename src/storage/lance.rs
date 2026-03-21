@@ -99,11 +99,7 @@ impl LanceStorage {
     }
 
     /// Insert or update code chunks with their embeddings
-    pub async fn upsert_chunks(
-        &self,
-        chunks: &[CodeChunk],
-        embeddings: &[Vec<f32>],
-    ) -> Result<()> {
+    pub async fn upsert_chunks(&self, chunks: &[CodeChunk], embeddings: &[Vec<f32>]) -> Result<()> {
         if chunks.is_empty() || embeddings.is_empty() {
             return Ok(());
         }

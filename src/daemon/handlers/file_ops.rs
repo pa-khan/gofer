@@ -44,7 +44,7 @@ pub async fn tool_search_files(args: Value, ctx: &ToolContext) -> Result<Value> 
         .map_err(|e| GoferError::InvalidParams(format!("Invalid regex: {}", e)))?;
 
     let search_root = if let Some(dir) = directory {
-        resolve_path_buf(&ctx.root_path, dir)
+        resolve_path_buf(&ctx.root_path, dir)?
     } else {
         ctx.root_path.as_ref().clone()
     };
@@ -189,7 +189,7 @@ pub async fn tool_list_directory(args: Value, ctx: &ToolContext) -> Result<Value
             ]
         });
 
-    let abs_path = resolve_path_buf(&ctx.root_path, path);
+    let abs_path = resolve_path_buf(&ctx.root_path, path)?;
 
     if !abs_path.exists() {
         return Err(GoferError::InvalidParams(format!("Path not found: {}", path)).into());
@@ -261,7 +261,7 @@ pub async fn tool_get_file_metadata(args: Value, ctx: &ToolContext) -> Result<Va
         .and_then(|v| v.as_str())
         .ok_or_else(|| GoferError::InvalidParams("path is required".into()))?;
 
-    let abs_path = resolve_path_buf(&ctx.root_path, path);
+    let abs_path = resolve_path_buf(&ctx.root_path, path)?;
 
     if !abs_path.exists() {
         return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
@@ -316,7 +316,7 @@ pub async fn tool_patch_file(args: Value, ctx: &ToolContext) -> Result<Value> {
 
     let occurrence = args.get("occurrence").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
 
-    let abs_path = resolve_path_buf(&ctx.root_path, path);
+    let abs_path = resolve_path_buf(&ctx.root_path, path)?;
 
     if !abs_path.exists() {
         return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
@@ -404,7 +404,7 @@ pub async fn tool_write_file(args: Value, ctx: &ToolContext) -> Result<Value> {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let abs_path = resolve_path_buf(&ctx.root_path, path);
+    let abs_path = resolve_path_buf(&ctx.root_path, path)?;
     let existed = abs_path.exists();
 
     // Create parent directories if requested
@@ -448,7 +448,7 @@ pub async fn tool_append_to_file(args: Value, ctx: &ToolContext) -> Result<Value
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
-    let abs_path = resolve_path_buf(&ctx.root_path, path);
+    let abs_path = resolve_path_buf(&ctx.root_path, path)?;
 
     if !abs_path.exists() {
         return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
@@ -500,7 +500,7 @@ pub async fn tool_create_directory(args: Value, ctx: &ToolContext) -> Result<Val
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
-    let abs_path = resolve_path_buf(&ctx.root_path, path);
+    let abs_path = resolve_path_buf(&ctx.root_path, path)?;
     let already_existed = abs_path.exists();
 
     if already_existed {
@@ -541,8 +541,8 @@ pub async fn tool_move_file(args: Value, ctx: &ToolContext) -> Result<Value> {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let abs_source = resolve_path_buf(&ctx.root_path, source);
-    let abs_dest = resolve_path_buf(&ctx.root_path, destination);
+    let abs_source = resolve_path_buf(&ctx.root_path, source)?;
+    let abs_dest = resolve_path_buf(&ctx.root_path, destination)?;
 
     if !abs_source.exists() {
         return Err(GoferError::InvalidParams(format!("Source not found: {}", source)).into());

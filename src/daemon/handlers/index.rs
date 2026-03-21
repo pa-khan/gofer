@@ -14,9 +14,7 @@ pub async fn tool_get_index_status(ctx: &ToolContext) -> Result<Value> {
         .await?;
 
     // Get chunk count from LanceDB
-    let chunk_count = {
-        ctx.lance.count().await.unwrap_or(0)
-    };
+    let chunk_count = { ctx.lance.count().await.unwrap_or(0) };
 
     // Get index metadata
     #[derive(sqlx::FromRow)]
@@ -437,9 +435,7 @@ pub async fn tool_validate_index(ctx: &ToolContext) -> Result<Value> {
 
     // Validator 6: Missing or low embeddings
     let file_count = ctx.sqlite.get_file_count().await?;
-    let chunk_count = {
-        ctx.lance.count().await.unwrap_or(0)
-    };
+    let chunk_count = { ctx.lance.count().await.unwrap_or(0) };
 
     if file_count > 0 && chunk_count == 0 {
         issues.push(json!({

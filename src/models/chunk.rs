@@ -405,8 +405,6 @@ pub struct FrontendApiCallInfo {
     pub line: Option<i32>,
 }
 
-
-
 // === Structural Fingerprinting Types ===
 
 /// Type fingerprint для Jaccard-сравнения полей

@@ -59,31 +59,78 @@ impl IndexerService {
         // Limit concurrent indexing tasks to avoid OOM or embedding bottlenecks
         let semaphore = Arc::new(Semaphore::new(self.parallel_workers));
 
-        while let Some(task) = rx.recv().await {
-            // Acquire permit before spawning. This provides backpressure.
-            let permit = match semaphore.clone().acquire_owned().await {
-                Ok(p) => p,
-                Err(_) => break, // Semaphore closed (should not happen usually)
-            };
+        while let Some(first_task) = rx.recv().await {
+            // Buffer tasks dynamically to handle event storms (e.g. git checkout)
+            let mut tasks = vec![first_task];
+            while let Ok(task) = rx.try_recv() {
+                tasks.push(task);
+                if tasks.len() >= 10000 {
+                    break;
+                }
+            }
 
-            let service = self.clone();
-
-            tokio::spawn(async move {
+            let mut to_reindex = Vec::new();
+            let mut to_delete = Vec::new();
+            for task in tasks {
                 match task {
-                    IndexTask::Reindex(path) => {
+                    IndexTask::Reindex(path) => to_reindex.push(path),
+                    IndexTask::Delete(path) => to_delete.push(path),
+                }
+            }
+
+            // Process deletes individually
+            for path in to_delete {
+                let permit = match semaphore.clone().acquire_owned().await {
+                    Ok(p) => p,
+                    Err(_) => break, // Semaphore closed
+                };
+                let service = self.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = service.delete_file(&path).await {
+                        tracing::error!("Failed to delete {:?}: {}", path, e);
+                    }
+                    drop(permit);
+                });
+            }
+
+            // Process reindexing
+            if to_reindex.len() >= 10 {
+                // Large burst: Hand off to SEDA pipeline for max throughput and batching
+                tracing::info!(
+                    "Event storm detected: Batch indexing {} files",
+                    to_reindex.len()
+                );
+                let service = self.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = pipeline::run_pipeline(
+                        to_reindex,
+                        service.sqlite,
+                        service.lance,
+                        service.embedder,
+                        None,
+                        CancellationToken::new(),
+                    )
+                    .await
+                    {
+                        tracing::error!("Batched pipeline index failed: {}", e);
+                    }
+                });
+            } else {
+                // Small trickle: Hand off to individual tasks
+                for path in to_reindex {
+                    let permit = match semaphore.clone().acquire_owned().await {
+                        Ok(p) => p,
+                        Err(_) => break,
+                    };
+                    let service = self.clone();
+                    tokio::spawn(async move {
                         if let Err(e) = service.index_file(&path).await {
                             tracing::error!("Failed to index {:?}: {}", path, e);
                         }
-                    }
-                    IndexTask::Delete(path) => {
-                        if let Err(e) = service.delete_file(&path).await {
-                            tracing::error!("Failed to delete {:?}: {}", path, e);
-                        }
-                    }
+                        drop(permit);
+                    });
                 }
-                // Permit is dropped here, allowing the next task to start
-                drop(permit);
-            });
+            }
         }
 
         tracing::info!("Indexer service stopped");
@@ -131,9 +178,16 @@ impl IndexerService {
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs() as i64;
 
+        // Perform LanceDB write FIRST. If this fails, we want to return early (via ?)
+        // so that we don't pollute SQLite with orphan metadata. This prevents split-brain.
+        if !chunks.is_empty() {
+            let texts: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
+            let embeddings = self.embedder.embed(texts).await?;
+            self.lance.upsert_chunks(&chunks, &embeddings).await?;
+        }
+
+        // SQLite operations safely execute AFTER LanceDB succeeds
         let file_id = self.sqlite.upsert_file(&path_str, modified, &hash).await?;
-
-
 
         let symbols_with_file_id: Vec<Symbol> = symbols
             .into_iter()
@@ -213,12 +267,6 @@ impl IndexerService {
             tracing::debug!("Resolved {} references", resolved);
         }
 
-        if !chunks.is_empty() {
-            let texts: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
-            let embeddings = self.embedder.embed(texts).await?;
-            self.lance.upsert_chunks(&chunks, &embeddings).await?;
-        }
-
         tracing::info!(
             "⚡ Incrementally indexed {:?}: {} symbols, {} chunks, {} refs",
             path,
@@ -274,9 +322,9 @@ impl IndexerService {
         }
 
         // Arc clones — no ownership transfer, no loss on error
+        let files = crate::indexer::watcher::scan_directory(root, extra_ignores);
         let metadata: Vec<pipeline::ParsedFileMetadata> = pipeline::run_pipeline(
-            root,
-            extra_ignores,
+            files,
             self.sqlite.clone(),
             self.lance.clone(),
             self.embedder.clone(),
@@ -372,7 +420,8 @@ impl IndexerService {
 
         // Phase 6: Build vector index for ANN search (incremental)
         {
-            if let Err(e) = self.lance
+            if let Err(e) = self
+                .lance
                 .create_vector_index_incremental(Some(&self.sqlite))
                 .await
             {
@@ -448,7 +497,8 @@ async fn detect_and_store_subprojects(root: &Path, sqlite: &SqliteStorage) -> us
         // Read package name from package.json if available
         let pkg_name = ws_dir.join("package.json");
         let display_name = if pkg_name.exists() {
-            tokio::fs::read_to_string(&pkg_name).await
+            tokio::fs::read_to_string(&pkg_name)
+                .await
                 .ok()
                 .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
                 .and_then(|v| v.get("name")?.as_str().map(String::from))

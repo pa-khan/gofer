@@ -463,13 +463,13 @@ pub async fn tool_find_files(args: Value, ctx: &ToolContext) -> Result<Value> {
 
     let pat_string = pat.to_string();
     let ctx_root_path = ctx.root_path.clone();
-    
+
     let files = tokio::task::spawn_blocking(move || {
         let mut files = Vec::new();
 
         // Parse glob pattern inside block
-        let glob_pattern = glob::Pattern::new(&pat_string)
-            .map_err(|e| format!("Invalid glob pattern: {}", e))?;
+        let glob_pattern =
+            glob::Pattern::new(&pat_string).map_err(|e| format!("Invalid glob pattern: {}", e))?;
 
         // Use WalkDir for traversal
         let walker = WalkDir::new(&search_root).into_iter();
@@ -501,8 +501,10 @@ pub async fn tool_find_files(args: Value, ctx: &ToolContext) -> Result<Value> {
             }
         }
         Ok::<_, String>(files)
-    }).await.map_err(|e| GoferError::Internal(anyhow::anyhow!("Task panic: {}", e)))?
-      .map_err(|e| GoferError::Internal(anyhow::anyhow!(e)))?;
+    })
+    .await
+    .map_err(|e| GoferError::Internal(anyhow::anyhow!("Task panic: {}", e)))?
+    .map_err(|e| GoferError::Internal(anyhow::anyhow!(e)))?;
 
     Ok(json!({
         "pattern": pat,
@@ -580,7 +582,8 @@ pub async fn tool_grep(args: Value, ctx: &ToolContext) -> Result<Value> {
                     }
                 }
                 if !file_hits.is_empty() {
-                    let rel_path = make_relative(&ctx_root_path, entry.path().to_str().unwrap_or(""));
+                    let rel_path =
+                        make_relative(&ctx_root_path, entry.path().to_str().unwrap_or(""));
                     file_matches.insert(rel_path, file_hits);
                 }
             }
@@ -589,8 +592,10 @@ pub async fn tool_grep(args: Value, ctx: &ToolContext) -> Result<Value> {
             }
         }
         Ok::<_, String>((file_matches, count))
-    }).await.map_err(|e| GoferError::Internal(anyhow::anyhow!("Task panic: {}", e)))?
-      .map_err(|e| GoferError::Internal(anyhow::anyhow!(e)))?;
+    })
+    .await
+    .map_err(|e| GoferError::Internal(anyhow::anyhow!("Task panic: {}", e)))?
+    .map_err(|e| GoferError::Internal(anyhow::anyhow!(e)))?;
 
     Ok(json!({
         "pattern": pat,

@@ -938,7 +938,9 @@ impl TypeScriptService {
                 if resolved.exists() {
                     let ext = resolved.extension().and_then(|e| e.to_str()).unwrap_or("");
                     if ["ts", "tsx", "js", "jsx"].contains(&ext) {
-                        let code = tokio::fs::read_to_string(&resolved).await.unwrap_or_default();
+                        let code = tokio::fs::read_to_string(&resolved)
+                            .await
+                            .unwrap_or_default();
                         let exports = collect_exports(&code);
                         if !exports.is_empty() {
                             out.push_str("\n**Available exports:**\n");

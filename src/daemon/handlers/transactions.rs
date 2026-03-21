@@ -466,7 +466,7 @@ async fn validate_operation(operation: &Operation, ctx: &ToolContext) -> Result<
     let mut conflicts = Vec::new();
 
     if let Some(p) = path {
-        let abs_path = resolve_path_buf(&ctx.root_path, p);
+        let abs_path = resolve_path_buf(&ctx.root_path, p)?;
         if !abs_path.exists() {
             conflicts.push(format!("File does not exist: {}", p));
         }
@@ -488,7 +488,7 @@ async fn create_snapshot(operation: &Operation, ctx: &ToolContext) -> Result<Opt
         Operation::CreateDirectory { .. } => return Ok(None),
     };
 
-    let abs_path = resolve_path_buf(&ctx.root_path, path);
+    let abs_path = resolve_path_buf(&ctx.root_path, path)?;
 
     if abs_path.exists() {
         let content = tokio::fs::read(&abs_path).await?;
@@ -509,7 +509,7 @@ async fn create_snapshot(operation: &Operation, ctx: &ToolContext) -> Result<Opt
 
 async fn restore_snapshots(snapshots: &[FileSnapshot], ctx: &ToolContext) -> Result<()> {
     for snapshot in snapshots {
-        let abs_path = resolve_path_buf(&ctx.root_path, &snapshot.path);
+        let abs_path = resolve_path_buf(&ctx.root_path, &snapshot.path)?;
 
         if snapshot.existed {
             // Restore original content

@@ -457,9 +457,7 @@ pub async fn tool_smart_file_selection(args: Value, ctx: &ToolContext) -> Result
 
     // 1. Vector search for semantic similarity
     let embedding = ctx.embedder.embed_query(query).await?;
-    let vector_results = {
-        ctx.lance.search(&embedding, limit * 3).await?
-    };
+    let vector_results = { ctx.lance.search(&embedding, limit * 3).await? };
 
     // 2. Extract unique files from vector results
     use std::collections::HashMap;
@@ -776,9 +774,8 @@ fn calculate_relevance_score_v2(
     let size_penalty = calculate_size_penalty(file_metadata.size_bytes);
 
     // 4. Calculate base score
-    let base_score = vector_score * weights.vector
-        + path_score * weights.path
-        + symbol_score * weights.symbols;
+    let base_score =
+        vector_score * weights.vector + path_score * weights.path + symbol_score * weights.symbols;
 
     // 5. Apply modifiers
     let final_score = base_score * recency_boost * size_penalty;
@@ -1117,8 +1114,6 @@ fn calculate_symbol_score(query: &str, symbols: &[crate::models::chunk::SymbolWi
 
     (matches as f32 / keywords.len() as f32).min(1.0)
 }
-
-
 
 /// Generate reasoning for file selection
 #[allow(dead_code)]

@@ -89,7 +89,7 @@ pub async fn tool_execute_function(args: Value, ctx: &ToolContext) -> Result<Val
         .unwrap_or(DEFAULT_TIMEOUT_SECONDS)
         .min(MAX_TIMEOUT_SECONDS);
 
-    let abs_path = resolve_path_buf(&ctx.root_path, path);
+    let abs_path = resolve_path_buf(&ctx.root_path, path)?;
 
     if !abs_path.exists() {
         return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
@@ -142,7 +142,7 @@ pub async fn tool_run_test(args: Value, ctx: &ToolContext) -> Result<Value> {
         .unwrap_or(30)
         .min(MAX_TIMEOUT_SECONDS);
 
-    let abs_path = resolve_path_buf(&ctx.root_path, path);
+    let abs_path = resolve_path_buf(&ctx.root_path, path)?;
 
     if !abs_path.exists() {
         return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());

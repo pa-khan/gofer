@@ -104,9 +104,7 @@ pub async fn run_cargo_check(
     tracing::info!("Running cargo check with options: {:?}", options);
 
     let mut cmd = tokio::process::Command::new("cargo");
-    cmd.arg("check")
-        .arg("--message-format=json")
-        .arg("--quiet");
+    cmd.arg("check").arg("--message-format=json").arg("--quiet");
 
     if options.workspace.unwrap_or(false) {
         cmd.arg("--workspace");
@@ -121,10 +119,7 @@ pub async fn run_cargo_check(
         cmd.arg("--manifest-path").arg(manifest);
     }
 
-    let output = cmd
-        .current_dir(root)
-        .output()
-        .await?;
+    let output = cmd.current_dir(root).output().await?;
 
     // Clear existing errors
     sqlite.clear_active_errors().await?;
@@ -313,7 +308,9 @@ pub async fn run_diagnostics(
 
     sqlite.clear_active_errors().await?;
 
-    let (cargo_errors, cargo_warnings) = run_cargo_check(root, sqlite, options).await.unwrap_or((0, 0));
+    let (cargo_errors, cargo_warnings) = run_cargo_check(root, sqlite, options)
+        .await
+        .unwrap_or((0, 0));
     let (tsc_errors, tsc_warnings) = run_tsc_check(root, sqlite).await.unwrap_or((0, 0));
 
     Ok(DiagnosticsResult {

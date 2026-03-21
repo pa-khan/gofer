@@ -65,7 +65,7 @@ pub async fn tool_extract_to_clipboard(args: Value, ctx: &ToolContext) -> Result
 
     let cut = args.get("cut").and_then(|v| v.as_bool()).unwrap_or(false);
 
-    let abs_path = resolve_path_buf(&ctx.root_path, path);
+    let abs_path = resolve_path_buf(&ctx.root_path, path)?;
 
     if !abs_path.exists() {
         return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
@@ -216,7 +216,7 @@ pub async fn tool_insert_clipboard(args: Value, ctx: &ToolContext) -> Result<Val
         buffer.content.clone()
     };
 
-    let abs_path = resolve_path_buf(&ctx.root_path, path);
+    let abs_path = resolve_path_buf(&ctx.root_path, path)?;
 
     // Read file (or create if doesn't exist)
     let mut lines = if abs_path.exists() {
@@ -306,7 +306,7 @@ pub async fn tool_replace_with_clipboard(args: Value, ctx: &ToolContext) -> Resu
         buffer.content.clone()
     };
 
-    let abs_path = resolve_path_buf(&ctx.root_path, path);
+    let abs_path = resolve_path_buf(&ctx.root_path, path)?;
 
     if !abs_path.exists() {
         return Err(GoferError::InvalidParams(format!("File not found: {}", path)).into());
